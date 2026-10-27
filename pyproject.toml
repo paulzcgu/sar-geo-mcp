@@ -1244,7 +1244,18 @@ name = "sar-geo-mcp"
 # The agency cache's query version is now 2, so ground staged before
 # fetches its agency records once more. The public display is not known to
 # carry routes BLM has designated closed.
-version = "0.42.0"
+# 0.42.1: two answers no longer give out-of-date advice.
+# WHAT WAS WRONG: coverage_for's warning for a line assignment with no
+# saved metrics told the caller to "pass --corridor-width", a command-line
+# option no tool takes, and debrief_assignment added a note apologising
+# for it. plan_urban_search's description said lot lines were read only
+# 200 m round the search circle, which has not been true since 0.40.0.
+# WHAT CHANGED: the coverage warning names only the `terrain_metrics`
+# tool, and the debrief note about the option is gone. The description
+# says lot lines are read 200 m round the circle, then twice as far again
+# while a kept block runs into the edge, up to 1,000 m past it. Nothing
+# else changes.
+version = "0.42.1"
 description = "CalTopo interaction hub and geo-computing accessories for SAR"
 license = "MIT"
 license-files = ["LICENSE"]

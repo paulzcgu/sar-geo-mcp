@@ -489,8 +489,7 @@ def test_failed_metrics_fail_an_area_s_coverage_naming_why(ctx, monkeypatch):
 
 @pytest.mark.parametrize("saved, width", [
     (False, " and no metrics are saved on this ground, so this line's corridor is "
-            "coverage_for's default width, as its own warning says (the --corridor-width "
-            "that warning names is a command-line option; no tool here takes it)"),
+            "coverage_for's default width, as its own warning says"),
     (True, ", so this line's corridor width is the one terrain_metrics saved on this ground "
            "at an earlier call"),
 ])
@@ -687,8 +686,7 @@ def test_coverage_of_a_line_with_no_metrics_saved_or_asked_for_runs_saying_so(ct
     assert coverage["warnings"][-1] == (
         "metrics was left out of include and no metrics are saved on this ground, so this "
         "line's corridor is coverage_for's default width, as its own warning says - add "
-        "\"metrics\" to include for the width this ground's vegetation gives (the "
-        "--corridor-width that warning names is a command-line option; no tool here takes it)")
+        "\"metrics\" to include for the width this ground's vegetation gives")
 
 
 def test_a_line_whose_metrics_an_earlier_call_saved_carries_no_scenario_note(ctx, monkeypatch):

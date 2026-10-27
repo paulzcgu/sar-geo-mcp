@@ -232,7 +232,7 @@ def test_compute_coverage_of_an_area_assignment_still_reports_area_kind(tmp_path
 def test_compute_coverage_line_falls_back_without_terrain(tmp_path):
     # The terrain step is polygon math and may never have been run for a
     # line assignment. Coverage must still work, using the 10 m default
-    # corridor (5 m half-width) and saying so - unless --corridor-width was
+    # corridor (5 m half-width) and saying so - unless corridor_width_m was
     # given (see test_compute_coverage_line_corridor_width_overrides_terrain).
     line_geometry = {
         "type": "LineString",
@@ -296,7 +296,7 @@ def test_a_line_s_name_warning_comes_before_its_default_corridor(tmp_path):
 
 
 def test_compute_coverage_line_corridor_width_overrides_terrain(tmp_path):
-    # --corridor-width is an explicit operator choice and wins even when
+    # corridor_width_m is an explicit operator choice and wins even when
     # terrain (and therefore a vegetation-adjusted ESW) is available.
     _write_terrain_fixture(tmp_path, sweep_width_m=10.0)
 

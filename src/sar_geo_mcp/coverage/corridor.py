@@ -31,7 +31,7 @@ SAMPLE_SPACING_GROUND_M = 2.0
 
 # Default corridor HALF-width in ground metres. Used only when terrain
 # metrics (and therefore a vegetation-adjusted ESW) are unavailable and no
-# explicit --corridor-width was given - see coverage.metrics.
+# explicit corridor_width_m was given - see coverage.metrics.
 DEFAULT_CORRIDOR_HALF_WIDTH_M = 5.0
 
 # Below this length a gap is GPS wobble, not a real unsearched stretch: a

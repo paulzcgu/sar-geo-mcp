@@ -289,9 +289,11 @@ def register(mcp, ctx) -> None:
         search radius of the centre (`max_distance_m`, the radius unless
         overridden), whole: the ring is extended out to the back fences
         beyond the nearest street, never cut. Lot lines are read over the
-        search circle and 200 m round it, so a block wholly outside the
-        circle is never drawn, whatever `max_distance_m` says: to search
-        wider, pass a larger radius. `set_id` names the
+        search circle and 200 m round it, then twice as far again while a
+        kept block runs into the edge of what was read, up to 1,000 m past
+        the circle, so a street the circle reaches is read to its end. A
+        block the circle does not reach is never drawn, whatever
+        `max_distance_m` says: to search wider, pass a larger radius. `set_id` names the
         assignment set, `created_at` dates it and `reused` says it was read
         back rather than drawn again. `assignments`, nearest the centre
         first, each with `id` (for `get_candidate`, with the section's

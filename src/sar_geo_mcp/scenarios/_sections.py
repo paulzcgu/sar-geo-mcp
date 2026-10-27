@@ -2490,10 +2490,8 @@ def coverage_section(ctx: ServerContext, handle: str, *, track_names: list[str],
 def _line_width_note(*, left_out: bool, saved: bool | None) -> str:
     """The warning a line assignment's coverage carries when this call's
     metrics did not give its corridor width: why they did not (`left_out`
-    of include, or failed), and which width coverage_for used instead.
-    coverage_for's own warning for the default corridor speaks to a command
-    line (`--corridor-width`), which no tool takes, so the scenario's own
-    remedy is said here."""
+    of include, or failed), which width coverage_for used instead, and -
+    when metrics were left out - the scenario's own remedy."""
     why = "metrics was left out of include" if left_out else "the metrics section failed"
     if saved:
         return (f"{why}, so this line's corridor width is the one terrain_metrics saved on "
@@ -2501,9 +2499,7 @@ def _line_width_note(*, left_out: bool, saved: bool | None) -> str:
     return (f"{why} and no metrics are saved on this ground, so this line's corridor is "
             "coverage_for's default width, as its own warning says"
             + (" - add \"metrics\" to include for the width this ground's vegetation gives"
-               if left_out else "")
-            + " (the --corridor-width that warning names is a command-line option; no tool "
-              "here takes it)")
+               if left_out else ""))
 
 
 def _total(items: list[dict], key: str, measure: str | None) -> float | None:
