@@ -13,7 +13,7 @@ __pycache__/
 
 # Tile, map-state and staged-ground cache: ZA_CACHE_DIR defaults to
 # ./cache, which is inside the checkout. Machine-local data, never source.
-cache/
+/cache/
 
 # Build
 dist/
