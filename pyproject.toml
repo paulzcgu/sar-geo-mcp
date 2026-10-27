@@ -1274,9 +1274,9 @@ name = "sar-geo-mcp"
 # cost). Google is not pullable: its terms keep it to landing-zone chips.
 # Every answer says it is raw data, without the planning tools' checks.
 # Each source caches in <cache>/<source name>/. The first fetch after
-# upgrading moves that source's files from the cache root into its folder
-# - a rename, never a download (a 2.9 GB cache took 0.04 s) - and rewrites
-# their index keys; staged ground and map reads stay where they were.
+# upgrading moves that source's files from the cache root into its
+# folder - a rename, never a download (a 2.9 GB cache took 0.04 s) - and
+# rewrites their index keys; staged ground and map reads stay where they were.
 # Requests, retries, timeouts and the Overpass query are unchanged, byte
 # for byte. A Python consumer importing these directly finds them moved:
 # terrain.dem -> sources.dem; terrain.evt's fetching and code table ->
