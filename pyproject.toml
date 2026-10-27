@@ -1169,7 +1169,125 @@ name = "sar-geo-mcp"
 # `folder`. CalTopo has no folder inside a folder, so a feature that already
 # carries one is refused rather than nested. 0.38.0 and 0.39.0 were
 # withdrawn from PyPI; this release replaces them.
-version = "0.39.1"
+# 0.40.0: urban assignments are bounded by streets, as a planner draws them.
+# WHAT WAS WRONG: lot lines were read only 200 m past the search circle, so
+# a street the circle reached was cut off in a straight line where that
+# read stopped, half its lots missing. A street's run was never ended by a
+# cross street - the closing spanned it - so a run the circle touched was
+# kept on past cross street after cross street. The lots at a run's end
+# that face the cross street were filed under it and dropped with it, so
+# the edge stopped at a back fence short of the street. And each assignment
+# stopped at its own back fences and kerbs, so the street between two
+# neighbours was nobody's and their edges did not meet. WHAT CHANGED: a run
+# is cut along every other named street's OpenStreetMap centreline (a lot
+# goes whole to the piece holding most of it), so a block is a street both
+# sides from cross street to cross street; a run the circle keeps takes the
+# corner lots and the row facing its cross street when their own block is
+# not kept. Edges snap to the streets: no ground is given across a
+# centreline (a line of sight to the outline, so a dead end leaks nothing),
+# so neighbours either side of a street meet on it; an edge or a notch
+# facing a street is drawn out to it, straight ahead, with no finger along
+# the street; a pocket or slit mostly surrounded by assignments, or the
+# rest of a city block they mostly cover, goes to the nearest; a
+# boulevard's median goes with the ground beside it; and every outline is simplified as one
+# coverage, so a shared edge is one line. And: when a block the circle keeps runs
+# into the edge of the lot lines read, they are read again twice as far
+# out, up to the 1,000 m planning buffer and never at a coarser pixel; a
+# block within a closing of that edge counts as running into it, since
+# the next lot may be cut too thin to show its roof. `assumptions.margin_m`
+# says how far they were read. Only streets with a lot within 200 m of the
+# area are drawn, so the wider read costs less than its size, and lots left
+# out far beyond the area are no longer counted. Ground between two
+# assignments up to 90 m apart (`snap_gap_m`) with no street through it is
+# split down its middle; an outer back fence facing no other assignment
+# stays where it is. `area_ha` now includes the street ground taken. The
+# block method is 4, so a set made by 0.39 is made again rather than read
+# back. A call that has to read wider takes longer: half a mile across, 14
+# to 32 s in four towns (a bayside suburb, a lagoon town, a hillside town
+# and a lakeside one) rather than about 6.
+# 0.41.0: areas are in acres.
+# WHAT WAS WRONG: every area came back in hectares, a unit search planners
+# in the US do not work in. WHAT CHANGED: every area a tool answers is in
+# acres, and the names say so - `area_acres` (urban blocks and assignments,
+# describe_boundary, hasty corridors, travel-time rings, buffer_geometry),
+# `target_acres` (urban_assignments, plan_urban_search), and
+# assignment_norms' `target_area_acres`, `polygon_area_acres` and
+# `area_acres_by_resource`; an area norm flag is `area_acres`, banded in
+# acres, and CalTopo descriptions say acres. The old names are gone: a
+# script or override passing `target_ha` must pass `target_acres`. The
+# corpus file keeps its hectares, so another agency's file is written as
+# before, and is converted where an answer is written. Urban sets are named
+# by `target_acres` now, so each is made once afresh.
+# 0.42.0: unmarked_paths reports what the agencies have on record; DEM
+# benches are experimental and off by default; BLM routes are read again.
+# WHAT WAS WRONG: run on four public-land areas, the terrain source's
+# "benches" were mostly not roads: 82-99% of them sat on a ridge crest or
+# in a channel, because the bench test - ground flatter than the slope
+# around it - fires there as readily as on a cut road, and on 6.3 m ground
+# a 4 m road tread is under one pixel. The imagery check made it worse: a
+# bare strip counted as a second, independent sighting, so a dry creek bed
+# under a channel "bench" came back `corroborated` and ranked first. And
+# BLM had retired the `BLM_Natl_GTLF` service the `blm` source read, so it
+# failed with a 404 everywhere and BLM land had no agency record at all.
+# WHAT CHANGED: with no `sources` named, unmarked_paths reads the Forest
+# Service, BLM and USGS inventories and checks each line against NAIP
+# imagery; `terrain` is read only when named, and every call that reads it
+# carries a warning that it is experimental. `imagery.bare` is now a check
+# reported on each line and never a sighting: it changes no tier and no
+# order. A caller who wants the benches back passes `terrain` in
+# `sources`; a bench on bare ground now stays `terrain_only`. The `blm`
+# source reads `BLM_Natl_GTLF_Public_Display`, all eight layers: a route's
+# kind (road or trail) and what it is managed for come from its layer
+# (`detail.managed_for`), and a route managed for limited public motorized
+# use, or not assessed for public use, says so in `status` beside any
+# access restriction BLM records ("Unknown" and "All" are no restriction).
+# The agency cache's query version is now 2, so ground staged before
+# fetches its agency records once more. The public display is not known to
+# carry routes BLM has designated closed.
+# 0.42.1: two answers no longer give out-of-date advice.
+# WHAT WAS WRONG: coverage_for's warning for a line assignment with no
+# saved metrics told the caller to "pass --corridor-width", a command-line
+# option no tool takes, and debrief_assignment added a note apologising
+# for it. plan_urban_search's description said lot lines were read only
+# 200 m round the search circle, which has not been true since 0.40.0.
+# WHAT CHANGED: the coverage warning names only the `terrain_metrics`
+# tool, and the debrief note about the option is gone. The description
+# says lot lines are read 200 m round the circle, then twice as far again
+# while a kept block runs into the edge, up to 1,000 m past it. Nothing
+# else changes.
+# 0.43.0: every external data source is a class of its own, in its own
+# cache folder, and Claude can pull one directly.
+# WHAT WAS WRONG: the code that fetched each service was spread through
+# the planning code - Overpass in terrain/linear.py beside the way
+# classes, hospitals and road times in planning/medical.py beside trauma
+# levels - with five copies of the same HTTP plumbing, so a new tool or a
+# new source had nowhere to start from, and Claude could reach a source
+# only through a tool built on it. Every source cached at the cache root.
+# WHAT CHANGED: sources/ (infra) holds one class per source on a shared
+# base - raster, features or service - with its endpoint override, key
+# handling, attribution, coverage and safe failure: usgs_3dep, landfire_evt,
+# caltopo_wms, usgs_naip, mapbox_satellite, google_satellite, osm,
+# agency_ways, hifld_hospitals, osrm and tigerweb_states. Three new
+# components: list_data_sources, fetch_raster (an image of an area saved as
+# a file, with a summary, never pixels) and query_features (GeoJSON, e.g.
+# OpenStreetMap ways filtered by tag over cached tiles, at no Overpass
+# cost). Google is not pullable: its terms keep it to landing-zone chips.
+# Every answer says it is raw data, without the planning tools' checks.
+# Each source caches in <cache>/<source name>/. The first fetch after
+# upgrading moves that source's files from the cache root into its folder
+# - a rename, never a download (a 2.9 GB cache took 0.04 s) - and rewrites
+# their index keys; staged ground and map reads stay where they were.
+# Requests, retries, timeouts and the Overpass query are unchanged, byte
+# for byte. A Python consumer importing these directly finds them moved:
+# terrain.dem -> sources.dem; terrain.evt's fetching and code table ->
+# sources.landfire (codes_at_cells and composition stay); terrain.linear's
+# Overpass fetching, query and versions -> sources.osm (classification,
+# routes_for, parking_for, gates_for stay); planning.agency_ways ->
+# sources.agency; planning.chips -> sources.static_imagery; NAIP fetching
+# -> sources.naip; query_hospitals -> sources.hifld, osrm_table ->
+# sources.osrm, point_state -> sources.tigerweb, osm_helipads_near ->
+# sources.osm.helipads_near.
+version = "0.43.0"
 description = "CalTopo interaction hub and geo-computing accessories for SAR"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -1216,13 +1334,13 @@ sar-geo-mcp = "sar_geo_mcp.server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-# The LANDFIRE vegetation lookup ships with the code. Learned the hard way
+# The LANDFIRE vegetation lookup (sources/data) ships with the code. Learned the hard way
 # in an earlier project: an editable install reads straight from src/, so a
 # missing package-data entry stays invisible until a real wheel is built
 # and something fails at runtime.
 # The assignment-anatomy norms (planning/norms.py) ship the same way, for
 # the same reason.
-sar_geo_mcp = ["terrain/data/*.csv", "planning/data/*.json"]
+sar_geo_mcp = ["sources/data/*.csv", "planning/data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

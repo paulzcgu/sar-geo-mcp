@@ -37,7 +37,7 @@ from sar_geo_mcp.planning.populated import (
     populated_params,
     populated_set,
 )
-from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
 CENTRE = (36.5212, -121.8105)
 SCALE = math.cos(math.radians(CENTRE[0]))
@@ -564,3 +564,112 @@ def test_every_block_is_one_polygon_with_no_shared_ground(tmp_path):
     for i, a in enumerate(outlines):
         for b in outlines[i + 1:]:
             assert a.intersection(b).area * SCALE * SCALE < 0.01
+
+
+def test_a_street_running_past_the_first_read_is_read_out_to_its_end(tmp_path):
+    """Elm Street's lots run 500 m east, past the 200 m margin first read
+    round a 170 m circle: the panel is read wider until the block the
+    circle keeps no longer runs into its edge, so the street is drawn to
+    its end rather than cut where the panel stopped."""
+    parcels, roofs = [], []
+    for i in range(28):
+        x0 = -60 + 20 * i
+        for y0, y1 in ((10, 40), (-40, -10)):
+            parcels.append(_rect(x0, y0, x0 + 20, y1))
+            cy = (y0 + y1) / 2
+            roofs.append(_rect(x0 + 5, cy - 5, x0 + 15, cy + 5))
+    directory = _staged(tmp_path)
+    street = elm_street()
+    street["geometry"]["coordinates"] = [list(_merc(-150, 0)), list(_merc(600, 0))]
+    (directory / "osm.json").write_text(json.dumps(
+        {"routes": [street], "parking": [], "query_version": OSM_QUERY_VERSION}),
+        encoding="utf-8")
+    calls = []
+    result = populated_areas(directory, wms_base_url=WMS, cache_dir=tmp_path / "cache",
+                             fetch=fake_fetch(parcels, roofs, calls=calls))
+    assert result["assumptions"]["margin_m"] > 200.0
+    (block,) = [b for b in result["blocks"] if b["name"] == "Elm Street"]
+    assert block["facts"]["clipped_at_edge"] is False
+    assert block["facts"]["parcels"] == 56
+    assert _shape(block).covers(_point(490, 25))
+    assert len(calls) > 2                              # read again, wider
+
+
+def test_a_block_within_the_first_read_is_read_once(tmp_path):
+    calls = []
+    directory = _staged(tmp_path)
+    parcels, roofs = town()
+    result = populated_areas(directory, wms_base_url=WMS, cache_dir=tmp_path / "cache",
+                             fetch=fake_fetch(parcels, roofs, calls=calls))
+    assert result["assumptions"]["margin_m"] == 200.0
+    assert len(calls) == 2                             # parcels and structures, once
+
+
+def _street(name, x0, y0, x1, y1, way="way/9"):
+    return {"id": way, "kind": "route",
+            "geometry": {"type": "LineString",
+                         "coordinates": [list(_merc(x0, y0)), list(_merc(x1, y1))]},
+            "properties": {"name": name, "route_type": "ROAD"}}
+
+
+def _lots_along(x_starts, *, width=20):
+    """Lots both sides of Elm Street (y 10..40 and -40..-10), a roof on each."""
+    parcels, roofs = [], []
+    for x0 in x_starts:
+        for y0, y1 in ((10, 40), (-40, -10)):
+            parcels.append(_rect(x0, y0, x0 + width, y1))
+            cy = (y0 + y1) / 2
+            roofs.append(_rect(x0 + 5, cy - 5, x0 + width - 5, cy + 5))
+    return parcels, roofs
+
+
+def _staged_with(tmp_path, routes, *, radius_m):
+    directory = _staged(tmp_path, radius_m=radius_m)
+    (directory / "osm.json").write_text(json.dumps(
+        {"routes": routes, "parking": [], "query_version": OSM_QUERY_VERSION}),
+        encoding="utf-8")
+    return directory
+
+
+def test_a_cross_street_ends_a_run_and_the_run_past_it_is_its_own_block(tmp_path):
+    """Oak Street crosses Elm Street at x=200, a 20 m right-of-way the
+    closing would span. Elm's run is cut there: the circle keeps the run up
+    to Oak, and the run past it - which the circle does not reach - is no
+    part of this answer."""
+    parcels, roofs = _lots_along([-60 + 20 * i for i in range(13)]          # -60..200
+                                 + [210 + 20 * i for i in range(8)])        # 210..370
+    parcels = [lot for lot in parcels if not (lot[0] < 210 and lot[2] > 190)]
+    roofs = [roof for roof in roofs if not (roof[0] < 210 and roof[2] > 190)]
+    routes = [_street("Elm Street", -150, 0, 450, 0, "way/1"),
+              _street("Oak Street", 200, -150, 200, 150, "way/2")]
+    directory = _staged_with(tmp_path, routes, radius_m=170.0)
+    result = populated_areas(directory, wms_base_url=WMS, cache_dir=tmp_path / "cache",
+                             fetch=fake_fetch(parcels, roofs))
+    (block,) = [b for b in result["blocks"] if b["name"] == "Elm Street"]
+    outline = _shape(block)
+    assert outline.covers(_point(170, 25))
+    assert not outline.intersects(_point(260, 25))
+    assert block["facts"]["parcels"] == 24                 # 12 a side, -60..180
+
+
+def test_a_run_is_finished_out_to_its_cross_street(tmp_path):
+    """The lots at the end of Elm's run face Oak Street, the cross street,
+    and are filed under it; Oak's block lies outside the circle. They are
+    searched with Elm's run, so its edge is the cross street rather than a
+    back fence short of it - and Oak's far side stays out."""
+    elm, elm_roofs = _lots_along([-60 + 20 * i for i in range(9)])           # -60..120
+    corner = [_rect(120, 10, 140, 40), _rect(120, -40, 140, -10)]            # face Oak
+    corner_roofs = [_rect(124, 15, 136, 35), _rect(124, -35, 136, -15)]
+    far = [_rect(160, y, 190, y + 20) for y in (-60, -40, -20, 0, 20, 40)]   # Oak's far side
+    far_roofs = [_rect(165, y + 5, 185, y + 15) for y in (-60, -40, -20, 0, 20, 40)]
+    routes = [_street("Elm Street", -150, 0, 150, 0, "way/1"),
+              _street("Oak Street", 150, -150, 150, 150, "way/2")]
+    directory = _staged_with(tmp_path, routes, radius_m=60.0)
+    result = populated_areas(directory, wms_base_url=WMS, cache_dir=tmp_path / "cache",
+                             fetch=fake_fetch(elm + corner + far,
+                                              elm_roofs + corner_roofs + far_roofs))
+    (block,) = [b for b in result["blocks"] if b["name"] == "Elm Street"]
+    outline = _shape(block)
+    assert outline.covers(_point(130, 25)) and outline.covers(_point(130, -25))
+    assert not outline.intersects(_point(175, 30))
+    assert block["facts"]["parcels"] == 20

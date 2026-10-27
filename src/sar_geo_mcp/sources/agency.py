@@ -1,4 +1,4 @@
-"""Roads and trails from the land agencies' own records, for one staged box.
+"""Roads and trails from the land agencies' own records: a source.
 
 WHY THESE AND NOT ONLY OPENSTREETMAP
 ------------------------------------
@@ -25,7 +25,17 @@ THE LAYERS, VERIFIED LIVE 2026-10-21
   with `sourceoriginator` "U.S. Forest Service". Each record's lineage is
   therefore read from its originator field, so a copy is never counted as
   a second, independent sighting.
-- BLM `BLM_Natl_GTLF` layer 0 (Ground Transportation Linear Features).
+- BLM `BLM_Natl_GTLF_Public_Display` layers 0-7 (Ground Transportation
+  Linear Features), verified live 2026-10-27. BLM retired the single-layer
+  `BLM_Natl_GTLF` service (it now answers 404) and split its routes by
+  what each is managed for: 0 and 1 roads for public and limited public
+  motorized use, 2 and 3 the same for trails, 4 non-motorized and 5
+  non-mechanized trails, 6 trails not assessed for public use, 7 trails
+  managed for public use. All eight are read. The kind and the managed-for
+  class come from the layer; the old observed mode of transport is gone,
+  and `PLAN_MODE_TRNSPRT` is kept as detail. Being a public display, it is
+  not known to carry routes BLM has designated closed - the ones most
+  likely missing from OSM.
 
 None needs a credential. All return at most 2000 records a page and support
 `resultOffset` pagination.
@@ -49,21 +59,29 @@ from pathlib import Path
 from typing import Any
 
 from ..net_errors import safe_reason
-
-USER_AGENT = "sar-geo-mcp (search and rescue planning)"
+from .base import (
+    Area,
+    FeatureResult,
+    FeatureSource,
+    JsonResponse,
+    SourceInfo,
+    SourceUnavailable,
+    http_get,
+)
 
 CACHE_FILENAME = "agency_ways.json"
 
 #: Bumped when a layer, a field or the record shape changes, so a staged
 #: directory fetched under the old rules is fetched again, not misread.
-AGENCY_QUERY_VERSION = 1
+AGENCY_QUERY_VERSION = 2
 
 PAGE_SIZE = 2000
 MAX_PAGES = 20
 
 _USFS = "https://apps.fs.usda.gov/arcx/rest/services/EDW"
 _TNM = "https://carto.nationalmap.gov/arcgis/rest/services/transportation/MapServer"
-_BLM = "https://gis.blm.gov/arcgis/rest/services/transportation/BLM_Natl_GTLF/MapServer"
+_BLM = ("https://gis.blm.gov/arcgis/rest/services/transportation/"
+        "BLM_Natl_GTLF_Public_Display/MapServer")
 
 
 def _text(value) -> str | None:
@@ -144,19 +162,47 @@ def _usgs_road(attributes: dict, *, closed_layer: bool) -> dict:
     }
 
 
-def _blm(attributes: dict) -> dict:
-    mode = _text(attributes.get("OBSRVE_MODE_TRNSPRT"))
-    motorized = bool(mode) and mode.lower().startswith("motorized")
+#: BLM access restrictions that restrict nothing, in any of the cases BLM
+#: writes them ("None", "UNKNOWN", "All").
+_BLM_NO_RESTRICTION = frozenset({"none", "unknown", "all"})
+
+
+def _blm(attributes: dict, *, kind: str, managed_for: str,
+         limited: str | None = None) -> dict:
+    """A BLM route. `kind`, `managed_for` and `limited` come from the layer
+    it was read from: the Public Display service files each route under
+    what it is managed for."""
     restriction = _text(attributes.get("PLAN_ACCESS_RSTRCT"))
+    if restriction and restriction.lower() in _BLM_NO_RESTRICTION:
+        restriction = None
+    status = [part for part in (limited, restriction and restriction.lower()) if part]
     accuracy = attributes.get("ACCURACY_FT")
     return {
-        "kind": "road" if motorized else "trail", "lineage": "blm",
+        "kind": kind, "lineage": "blm",
         "name": _text(attributes.get("ROUTE_PRMRY_NM")), "ref": _text(attributes.get("FAMS_ID")),
-        "status": restriction if restriction and restriction.lower() != "unknown" else None,
-        "detail": {"mode": mode, "surface": _text(attributes.get("OBSRVE_SRFCE_TYPE")),
+        "status": "; ".join(status) or None,
+        "detail": {"managed_for": managed_for,
+                   "mode": _text(attributes.get("PLAN_MODE_TRNSPRT")),
+                   "surface": _text(attributes.get("OBSRVE_SRFCE_TYPE")),
                    "accuracy_ft": accuracy if isinstance(accuracy, (int, float))
                    and accuracy > 0 else None},
     }
+
+
+_BLM_FIELDS = ("ROUTE_PRMRY_NM,FAMS_ID,PLAN_MODE_TRNSPRT,OBSRVE_SRFCE_TYPE,"
+               "PLAN_ACCESS_RSTRCT,ACCURACY_FT")
+
+#: (layer id, kind, what BLM manages it for, the status that class implies).
+_BLM_LAYERS = (
+    (0, "road", "public motorized use", None),
+    (1, "road", "limited public motorized use", "limited public motorized use"),
+    (2, "trail", "public motorized use", None),
+    (3, "trail", "limited public motorized use", "limited public motorized use"),
+    (4, "trail", "public non-motorized use", None),
+    (5, "trail", "public non-mechanized use", None),
+    (6, "trail", "not assessed for public use", "not assessed for public use"),
+    (7, "trail", "public use", None),
+)
 
 
 @dataclass(frozen=True)
@@ -186,10 +232,11 @@ SOURCES: dict[str, tuple[Layer, ...]] = {
               _usfs_trail, "Forest Service system trails"),
     ),
     "blm": (
-        Layer(f"{_BLM}/0",
-              "ROUTE_PRMRY_NM,FAMS_ID,OBSRVE_MODE_TRNSPRT,OBSRVE_SRFCE_TYPE,"
-              "PLAN_ACCESS_RSTRCT,ACCURACY_FT",
-              _blm, "BLM ground transportation (GTLF)"),
+        *(Layer(f"{_BLM}/{layer}", _BLM_FIELDS,
+                functools.partial(_blm, kind=kind, managed_for=managed_for,
+                                  limited=limited),
+                f"BLM {kind}s ({managed_for})")
+          for layer, kind, managed_for, limited in _BLM_LAYERS),
     ),
     "usgs_trails": (
         Layer(f"{_TNM}/37", "name,trailnumber,trailtype,sourceoriginator",
@@ -208,16 +255,8 @@ SOURCES: dict[str, tuple[Layer, ...]] = {
 AGENCY_SOURCES = tuple(SOURCES)
 
 
-def _http_get(url: str, params: dict | None = None, *, timeout: float = 60.0):
-    """A GET with the shared retry policy and an identifying User-Agent."""
-    import httpx
-
-    from ..net import get_with_retry
-
-    request = httpx.Request("GET", url, params=params)
-    return get_with_retry(
-        str(request.url), attempts=3, base_delay=1.0, timeout=timeout,
-        get=functools.partial(httpx.get, headers={"User-Agent": USER_AGENT}))
+#: The agency services can be slow over a large box: a minute per request.
+_http_get = functools.partial(http_get, timeout=60.0)
 
 
 def esri_paths_to_geojson(geometry: dict | None) -> dict | None:
@@ -319,3 +358,69 @@ def load_agency_ways(directory: Path, bbox_wgs84, sources: list[str], *,
         atomic_write_text(path, json.dumps({"version": AGENCY_QUERY_VERSION,
                                             "bbox_wgs84": box, "sources": cached}))
     return answers
+
+
+class AgencyWaysSource(FeatureSource):
+    """The land agencies' road and trail inventories, as a source.
+
+    `query` returns their records over an area as GeoJSON lines, each with
+    its agency's own detail. `filters={"source": [...]}` picks inventories
+    from `AGENCY_SOURCES`; all are read when none is named. A source that
+    fails is a warning; every source named failing is `SourceUnavailable`,
+    never an empty answer."""
+
+    info = SourceInfo(
+        name="agency_ways",
+        title="Land agency road and trail inventories",
+        kind="features",
+        provider="USDA Forest Service (EDW), Bureau of Land Management (GTLF), "
+                 "USGS National Map",
+        default_url=_USFS,
+        attribution="USDA Forest Service; Bureau of Land Management; USGS National Map",
+        coverage="US federal land: each agency's layers stop at its own land",
+        notes=(
+            "Not current: a line is where a road was surveyed, possibly decades ago.",
+            "The National Map republishes other agencies' lines: each record's "
+            "`lineage` names its originator, so a copy is not a second sighting.",
+            "Inventories: " + ", ".join(AGENCY_SOURCES),
+        ),
+    )
+
+    def query(self, area: Area, *, filters=None, limit: int | None = None) -> FeatureResult:
+        import hashlib
+
+        filters = dict(filters or {})
+        chosen = filters.pop("source", None)
+        if filters:
+            raise ValueError(f"agency_ways filters by source only; got {sorted(filters)}")
+        sources = ([chosen] if isinstance(chosen, str) else list(chosen)) if chosen \
+            else list(AGENCY_SOURCES)
+        from pyproj import Transformer
+
+        to_wgs84 = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+        west, south = to_wgs84.transform(area.bbox_3857[0], area.bbox_3857[1])
+        east, north = to_wgs84.transform(area.bbox_3857[2], area.bbox_3857[3])
+        box = (west, south, east, north)
+        key = hashlib.sha256(",".join(f"{v:.7f}" for v in box).encode()).hexdigest()[:32]
+        directory = self.folder() / key
+        directory.mkdir(parents=True, exist_ok=True)
+        get = None
+        if self.transport is not None:
+            transport = self.transport
+            get = lambda url, params=None: JsonResponse(transport.get_json(url, params))  # noqa: E731
+        answers = load_agency_ways(directory, box, sources, get=get)
+        features, warnings = [], []
+        for source, answer in answers.items():
+            if answer.get("status") != "ok":
+                warnings.append(f"{source} failed: {answer.get('reason')}")
+                continue
+            for record in answer.get("features") or []:
+                properties = {k: v for k, v in record.items() if k != "geometry"}
+                features.append({"type": "Feature", "geometry": record["geometry"],
+                                 "properties": properties})
+        if len(warnings) == len(answers):
+            raise SourceUnavailable(self.info.name, "; ".join(warnings))
+        cap = len(features) if limit is None else limit
+        return FeatureResult(features=features[:cap], total=len(features),
+                             attribution=self.info.attribution,
+                             truncated=len(features) > cap, warnings=warnings)

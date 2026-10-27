@@ -6,8 +6,14 @@ import pytest
 
 from sar_geo_mcp.planning import medical
 from sar_geo_mcp.planning.medical import (
-    Facility, facility_from_record, merge_campuses, nearest_medical_facilities,
-    osm_helipads_near, osrm_table, parse_trauma, point_state, query_hospitals)
+    HELIPAD_MATCH_M, Facility, facility_from_record, merge_campuses,
+    nearest_medical_facilities, parse_trauma)
+from sar_geo_mcp.sources import osrm as osrm_source
+from sar_geo_mcp.sources import tigerweb as tigerweb_source
+from sar_geo_mcp.sources.hifld import query_hospitals
+from sar_geo_mcp.sources.osm import helipads_near
+from sar_geo_mcp.sources.osrm import osrm_table
+from sar_geo_mcp.sources.tigerweb import point_state
 
 POINT = (37.42, -122.30)
 
@@ -283,8 +289,8 @@ def test_osrm_table_asks_lon_lat_and_reads_the_answer():
 
 
 def test_osrm_url_override(monkeypatch):
-    monkeypatch.setenv(medical.OSRM_URL_ENV, "http://router.local:5000/")
-    assert medical.osrm_url() == "http://router.local:5000"
+    monkeypatch.setenv(osrm_source.OSRM_URL_ENV, "http://router.local:5000/")
+    assert osrm_source.osrm_url() == "http://router.local:5000"
 
 
 # --- Helipads and air ----------------------------------------------------------
@@ -350,7 +356,7 @@ def test_osm_helipad_query_reads_ways_by_their_centre():
             {"type": "relation", "tags": {}},
         ]}
 
-    pads = osm_helipads_near([(37.43, -122.17)], post=post)
+    pads = helipads_near([(37.43, -122.17)], HELIPAD_MATCH_M, post=post)
     assert 'nwr(around:300,37.430000,-122.170000)[aeroway~"^(helipad|heliport)$"];' in asked[0]
     assert pads == [{"latitude": 37.43, "longitude": -122.17, "name": "P"},
                     {"latitude": 37.5, "longitude": -122.2, "name": None}]
@@ -556,8 +562,8 @@ def test_inputs_are_checked_before_any_network_call():
 
 
 def test_assumptions_name_hosts_not_urls(monkeypatch):
-    monkeypatch.setenv(medical.OSRM_URL_ENV, "https://user:secret@router.local/osrm?key=abc")
-    monkeypatch.setenv(medical.US_STATES_URL_ENV, "https://u:pw@states.local/q?token=xyz")
+    monkeypatch.setenv(osrm_source.OSRM_URL_ENV, "https://user:secret@router.local/osrm?key=abc")
+    monkeypatch.setenv(tigerweb_source.US_STATES_URL_ENV, "https://u:pw@states.local/q?token=xyz")
     result = run(FakeServices([]))
     assert result["assumptions"]["road"]["host"] == "router.local"
     assert result["assumptions"]["coverage"]["host"] == "states.local"

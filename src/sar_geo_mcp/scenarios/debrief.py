@@ -185,7 +185,7 @@ def register(mcp, ctx) -> None:
         Then terrain_metrics, coverage_for and identify_features each read the
         map once more, to check the boundary has not moved, and compute from
         the staged files. The computing alone, measured on 2026-10-22 on a
-        cached 44 ha assignment with every map read stubbed out, took under 3
+        cached 109-acre assignment with every map read stubbed out, took under 3
         seconds for all three sections together (the metrics, the coverage of
         one track and the default kinds); on ground already staged, add one map
         read for the staging and one for each section. If the assignment cannot

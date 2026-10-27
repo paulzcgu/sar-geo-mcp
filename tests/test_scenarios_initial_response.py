@@ -113,7 +113,7 @@ def hasty_set(handle: str, limit: int) -> CandidateSet:
                   sources=["waterway"], name=None,
                   geometry={"type": "Polygon",
                             "coordinates": [_square(lon + 0.006, lat - 0.004, 0.0015)]},
-                  facts=facts(610.0, 14.5, 135.0, width_m=30.0, area_ha=1.8),
+                  facts=facts(610.0, 14.5, 135.0, width_m=30.0, area_acres=1.8),
                   norm_flags=[], warnings=[]),
     ]
     return CandidateSet(
@@ -173,7 +173,7 @@ def rings_payload(arguments):
         rings.append({
             "minutes": minutes, "geometry": geometry,
             "outline": {"type": "LineString", "coordinates": _square(lon, lat, half)},
-            "parts": 2 if edge else 1, "area_ha": 120.0 * (index + 1) ** 2,
+            "parts": 2 if edge else 1, "area_acres": 120.0 * (index + 1) ** 2,
             "equivalent_radius_m": 618.0 * (index + 1), "max_reach_m": 900.0 * (index + 1),
             "max_reach_bearing_deg": 45.0, "farthest_point": far,
             "reach_by_direction_m": {direction: 500.0 * (index + 1) for direction in
@@ -329,7 +329,7 @@ def test_every_section_answers_and_the_summary_reads_the_facts(ctx, monkeypatch)
     assert not any("overlap_reason" in candidate for candidate in hasty["candidates"])
     assert road["flags"] == [hasty_set("h", 20).candidates[1].norm_flags[0]["note"]]
     assert road["branches"] == 2 and road["warnings"][0].startswith("Skyline Blvd forks")
-    assert creek["width_m"] == 30.0 and creek["area_ha"] == 1.8
+    assert creek["width_m"] == 30.0 and creek["area_acres"] == 1.8
     assert "branches" not in creek
     assert hasty["by_axis"] == {"trail": 1, "road": 1, "waterway": 1}
     assert hasty["by_kind"] == {"line": 2, "corridor": 1}
@@ -388,7 +388,7 @@ def test_every_section_answers_and_the_summary_reads_the_facts(ctx, monkeypatch)
     assert summary["parking"] == {"count": 2, "total_before_limit": 2, "nearest": {
         "id": "parking-w1", "kind": "parking", "name": "Trailhead lot",
         "distance_from_center_m": 140.0, "bearing_from_center_deg": 0.0, "flags": ["fee"]}}
-    assert summary["travel_rings"][0] == {"minutes": 15.0, "area_ha": 120.0,
+    assert summary["travel_rings"][0] == {"minutes": 15.0, "area_acres": 120.0,
                                           "equivalent_radius_m": 618.0, "max_reach_m": 900.0,
                                           "reaches_edge": False}
     assert summary["lz"]["nearest_any"]["id"] == "lz_1"
@@ -1229,12 +1229,12 @@ def test_the_export_files_are_ones_caltopo_imports(ctx, monkeypatch):
     # The ring's numbers as a team reads them: hectares, the circle of the
     # same area, and the farthest reach with its bearing.
     assert [f["properties"]["description"].split("\n")[0] for f in rings] == [
-        "Ground within 15 walking minutes of the place last seen at a steady pace: 120.0 ha, "
+        "Ground within 15 walking minutes of the place last seen at a steady pace: 120.0 acres, "
         "as much as a circle of 618 m radius; it reaches farthest 900 m at 45 deg.",
-        "Ground within 30 walking minutes of the place last seen at a steady pace: 480.0 ha, "
+        "Ground within 30 walking minutes of the place last seen at a steady pace: 480.0 acres, "
         "as much as a circle of 1,236 m radius; it reaches farthest 1,800 m at 45 deg.",
         "Ground within 60 walking minutes of the place last seen at a steady pace: "
-        "1,080.0 ha, as much as a circle of 1,854 m radius; it reaches farthest 2,700 m at "
+        "1,080.0 acres, as much as a circle of 1,854 m radius; it reaches farthest 2,700 m at "
         "45 deg."]
     assert "of the place last seen" in rings[0]["properties"]["description"]
     assert "not time since last seen" in rings[0]["properties"]["description"]
@@ -1497,7 +1497,7 @@ def test_the_sections_read_what_the_real_features_return(ctx, monkeypatch):
     hasty = result["sections"]["hasty"]
     lines = [c for c in real["hasty_candidates"]["candidates"] if c["kind"] == "line"]
     assert lines and lines[0]["name"] == "Long Trail route_0"
-    line_facts = set(_sections.HASTY_FACTS) - {"width_m", "area_ha"}
+    line_facts = set(_sections.HASTY_FACTS) - {"width_m", "area_acres"}
     assert line_facts <= set(lines[0]["facts"])
     assert {"by_axis", "by_kind", "total_before_limit", "truncated_to",
             "dropped_beyond_max_distance", "existing_assignments"} <= set(
@@ -1519,7 +1519,7 @@ def test_the_sections_read_what_the_real_features_return(ctx, monkeypatch):
         10.0, 20.0]
     # 20 minutes at top speed is 2,000 m; less the 1,000 m buffer.
     assert result["staging"]["rings"]["radius_m"] == 1000.0
-    assert all(math.isfinite(ring["area_ha"])
+    assert all(math.isfinite(ring["area_acres"])
                for ring in result["sections"]["travel_rings"]["rings"])
     assert geometry_types_in(result) == {"Point"}
 

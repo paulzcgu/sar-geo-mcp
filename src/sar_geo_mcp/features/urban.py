@@ -49,7 +49,7 @@ def populated_areas(ctx: ServerContext, handle: str, pixel_m: float = 1.0,
     return payload
 
 
-def urban_assignments(ctx: ServerContext, handle: str, target_ha: float | None = None,
+def urban_assignments(ctx: ServerContext, handle: str, target_acres: float | None = None,
                       resource_type: str = "GROUND",
                       max_distance_m: float | None = None,
                       building_markers: bool = False,
@@ -61,7 +61,7 @@ def urban_assignments(ctx: ServerContext, handle: str, target_ha: float | None =
     directory = resolved.directory
     # The server's norms go into the id when they choose the target, so a
     # set grouped under another `--norms` is grouped again, not read back.
-    params = urban_params(target_ha=target_ha, resource_type=resource_type,
+    params = urban_params(target_acres=target_acres, resource_type=resource_type,
                           max_distance_m=max_distance_m,
                           building_markers=building_markers, marker_color=marker_color,
                           norms=ctx.norms)
@@ -94,8 +94,11 @@ def register(mcp, ctx) -> None:
                               marker_color: str = "#FFFFFF") -> dict[str, Any]:
         """Populated blocks in town (urban and suburban ground only): the
         built-up lots along each street, both sides and the street between
-        them, outlined as one block per street - the block a planner draws
-        by hand on CalTopo's parcel layer for an urban search.
+        them, from cross street to cross street, outlined as one block -
+        the block a planner draws by hand on CalTopo's parcel layer for an
+        urban search. A block the area reaches is kept whole, out to its
+        cross streets, with the corner lots and the row of houses facing a
+        cross street at its end.
 
         Call `prepare_area` first over the town and pass its handle; the
         area must be under about 8 km across. Lots are read from CalTopo's
@@ -130,7 +133,7 @@ def register(mcp, ctx) -> None:
         Returns summaries WITHOUT geometry, nearest the area's centre
         first: id, `name` (the street, numbered "(1)", "(2)" when it has
         several runs), `axis` ("street" or "large_parcel") and facts -
-        `street`, `parcels`, `buildings`, `area_ha`, `median_parcel_m2`,
+        `street`, `parcels`, `buildings`, `area_acres`, `median_parcel_m2`,
         `roof_cover_pct`, a `point` guaranteed inside the block, distance
         and bearing from the centre, `clipped_at_edge` (a lot runs past the
         ground read) and `holes`. Fetch a block's polygon with
@@ -163,7 +166,7 @@ def register(mcp, ctx) -> None:
                                building_markers=building_markers, marker_color=marker_color)
 
     @mcp_tool(mcp, name="urban_assignments", tags={"feature"})
-    def _urban_assignments_tool(handle: str, target_ha: float | None = None,
+    def _urban_assignments_tool(handle: str, target_acres: float | None = None,
                                 resource_type: str = "GROUND",
                                 max_distance_m: float | None = None,
                                 building_markers: bool = False,
@@ -174,17 +177,19 @@ def register(mcp, ctx) -> None:
 
         Call `prepare_area` over the town first (`radius=0.5,
         radius_unit="mi"` for half a mile) and pass its handle.
-        `target_ha` is the size to aim for; left out, it is the corpus
-        median for `resource_type` (10 ha for GROUND, from
-        `assignment_norms`); hand-drawn door-to-door assignments run 1 to 4
-        ha, so pass `target_ha` (about 2.5) for teams of that size.
+        `target_acres` is the size to aim for; left out, it is the corpus
+        median for `resource_type` (25 acres for GROUND, from
+        `assignment_norms`); hand-drawn door-to-door assignments run 2.5 to
+        10 acres, so pass `target_acres` (about 6) for teams of that size.
+        Every area here is in acres.
         `max_distance_m` keeps every block any part of which is within that
         distance of the centre, whole - pass the radius to keep the blocks
         of the search circle: the ring is extended out to the back fences
         beyond the nearest street, never cut through a street's lots.
 
         THE RULES. Each block is one street, both sides, back fence to back
-        fence, and an assignment is whole blocks: a team always has both
+        fence, from cross street to cross street, and an assignment is
+        whole blocks: a team always has both
         sides of its streets, and its edges are back fences or streets.
         Blocks merge smallest first ALONG THE STREETS THAT JOIN THEM - a
         cul-de-sac into the road it opens onto, two runs of one street -
@@ -197,12 +202,19 @@ def register(mcp, ctx) -> None:
         then pair across water (two isles a team drives between), two at
         most, drawn as one polygon by a thin strip for the drawing only. No
         two assignments share ground; holes are filled unless another
-        assignment is inside. On ground staged before road classes were
+        assignment is inside. Edges snap to the streets, as on a
+        hand-drawn plan: two assignments either side of a street meet on
+        its OpenStreetMap centreline, an edge facing a street is drawn out
+        to it, and ground between two assignments with no street through it
+        is split down its middle; `area_acres` includes the street ground. An
+        outer back fence facing no other assignment stays where it is. A
+        street the circle reaches is read to its end, up to 1,000 m past
+        the area. On ground staged before road classes were
         kept, arterials are unknown and a warning says so.
 
         Returns summaries WITHOUT geometry, nearest the centre first: id,
         `name` (the main street and "+N" others), facts {`streets`,
-        `blocks`, `block_names`, `parcels`, `buildings`, `area_ha`,
+        `blocks`, `block_names`, `parcels`, `buildings`, `area_acres`,
         `point`, distance and bearing, `water_links`, `parts`, `markers`
         when asked}, plus `summary` (count, sizes, totals) and
         `assumptions.grouping`. `building_markers` (off unless asked for)
@@ -212,7 +224,7 @@ def register(mcp, ctx) -> None:
         the target: an arterial-bound pocket stays small. The planner
         adjusts and decides; nothing here is issued.
         """
-        return urban_assignments(ctx, handle=handle, target_ha=target_ha,
+        return urban_assignments(ctx, handle=handle, target_acres=target_acres,
                                  resource_type=resource_type, max_distance_m=max_distance_m,
                                  building_markers=building_markers,
                                  marker_color=marker_color)

@@ -2,7 +2,7 @@
 
 **Search and rescue planning tools for Claude, built on CalTopo maps.**
 
-SAR Geo gives Claude forty-four tools for planning a search: read a
+SAR Geo gives Claude forty-seven tools for planning a search: read a
 CalTopo map, stage the terrain around a place last seen, and ask for hasty
 search lines, parking, helicopter landing zones, the way out, walking-time
 rings, the nearest hospitals and trauma centers, and urban assignments of
@@ -88,6 +88,9 @@ own status and the exact feature call that returns the full answer.
 | `save_export` | Copy a file a tool wrote (an export GeoJSON, a chip) to `~/Documents/sar_geo/<chat folder>` and show it in Finder or Explorer |
 | `key_status` | Which optional keys are set (never their values), what each unlocks and where to get it |
 | `check_for_update` | The version running against the newest on PyPI, and how to update |
+| `list_data_sources` | Every external data source the server reads - what it is, its coverage and attribution, whether its key is set (never the key), and which tool pulls it |
+| `fetch_raster` | One raster source's own image of an area, saved as a file with a short summary: elevation, vegetation type, any CalTopo map layer, NAIP imagery or Mapbox satellite. Raw data, without the planning tools' checks |
+| `query_features` | One feature source's own features over an area as GeoJSON: OpenStreetMap ways and nodes filtered by tag, the land agencies' road and trail records, or hospitals. Raw data, without the planning tools' checks |
 | `prepare_terrain` | Stage one assignment's ground; returns the handle everything below names |
 | `terrain_metrics` | Everything measured for a staged assignment — the debrief bundle |
 | `identify_features` | Just the feature kinds you name — steep bands, drainages, clearings, cliff bands, `cliff_pitch` (ranked by the drop you would rig on), routes, ingress |
@@ -95,7 +98,7 @@ own status and the exact feature call that returns the full answer.
 | `slope_stats` | Slope statistics inside one named shape — "quantify that sidewall" |
 | `slope_shading` | CalTopo's slope bands beside this package's own, and the patches where the DEM reads shallower |
 | `shaded_relief` | Terrain to look at, and benches OpenStreetMap has not got - clean and OSM-overlaid, plus measured lineaments |
-| `unmarked_paths` | Roads and trails OpenStreetMap has not got, from Forest Service, BLM and USGS inventories, DEM benches and NAIP imagery at once - each ranked by how many independent sources saw it, closed Forest Service roads included, junction gaps bridged along flat ground, and written to a GeoJSON file CalTopo imports as coloured lines |
+| `unmarked_paths` | Roads and trails OpenStreetMap has not got, from Forest Service, BLM and USGS inventories - closed Forest Service roads included - each checked against NAIP imagery for a corridor still bare on the ground, ranked by how many independent inventories saw it, junction gaps bridged along flat ground, and written to a GeoJSON file CalTopo imports as coloured lines. DEM benches are an experimental source, read only when asked for |
 | `elevation_profile` | Elevation along a drainage centreline — how steep is the channel |
 | `coverage_for` | Coverage and gaps for a staged assignment, from named GPS tracks |
 | `prepare_area` | Stage the ground around a place last seen (point + radius, in m, km, ft, yd or mi) or a polygon; returns an `aoi-` handle that never goes stale, and the area's outline to draw |

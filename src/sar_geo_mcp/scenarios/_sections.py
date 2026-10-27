@@ -123,7 +123,7 @@ from ..planning.populated import populated_areas as populated_areas_impl
 from ..planning.travel_rings import (LARGEST_RADIUS_M, fastest_factor, minutes_list,
                                      radius_to_fit, rings_model)
 from ..planning.walking import NO_EVT_WARNING, NO_OSM_WARNING, WATERWAY_KINDS_UNKNOWN_WARNING
-from ..terrain.linear import OSM_QUERY_VERSION_PARKING
+from ..sources.osm import OSM_QUERY_VERSION_PARKING
 
 OK, FAILED, SKIPPED = "ok", "failed", "skipped"
 #: The section that draws what the others found for CalTopo. Its problems
@@ -458,7 +458,7 @@ SECTION_PARTS: dict[str, dict[str, tuple[Callable, dict[str, str]]]] = {
         "populated_areas": (urban_feature.populated_areas,
                             {"handle": _STAGED_HERE, "building_markers": _ARGUMENT_HERE}),
         "urban_assignments": (urban_feature.urban_assignments,
-                              {"handle": _STAGED_HERE, "target_ha": _ARGUMENT_HERE,
+                              {"handle": _STAGED_HERE, "target_acres": _ARGUMENT_HERE,
                                "resource_type": _ARGUMENT_HERE,
                                "building_markers": _ARGUMENT_HERE}),
     },
@@ -1597,7 +1597,7 @@ def parking_marker(candidate: dict, *, point_name: str = "the centre") -> dict:
 #: ingress stay with `get_candidate`, the line or corridor itself too. Not
 #: `overlap_reason`: whether a map was read is the set's, so every candidate
 #: gives the same one, and the section says it once (`hasty_section`).
-HASTY_FACTS = ("length_m", "width_m", "area_ha", "branches", "clipped_at_edge",
+HASTY_FACTS = ("length_m", "width_m", "area_acres", "branches", "clipped_at_edge",
                "distance_from_center_m", "bearing_from_center_deg",
                "travel_minutes_from_center", "overlap_existing_pct", "overlap_labels")
 
@@ -1774,7 +1774,7 @@ RINGS_MODEL_KEYWORDS = ("speed_factor", "off_way_factor", "creek_crossing_minute
                         "cliff_slope_deg", "vegetation_factors")
 #: What a ring keeps in a section: its measurements and two points, never
 #: its polygon, outline or the routes to its farthest ground.
-RING_FIELDS = ("minutes", "parts", "area_ha", "equivalent_radius_m", "max_reach_m",
+RING_FIELDS = ("minutes", "parts", "area_acres", "equivalent_radius_m", "max_reach_m",
                "max_reach_bearing_deg", "farthest_point", "reach_by_direction_m",
                "reaches_edge")
 #: Ring outline colours in the export: one cyan, light to dark, the
@@ -1876,7 +1876,7 @@ def ring_line(ring: dict, index: int, *, of: int = 1, point_name: str = "the poi
     RING_GROUND_NOTES) and what the minutes are NOT. Ring `index` of `of`
     takes its colour spread evenly over RING_STROKES, shortest lightest."""
     lines = [f"Ground within {ring['minutes']:g} walking minutes of {point_name} at a "
-             f"steady pace: {ring['area_ha']:,.1f} ha, as much as a circle of "
+             f"steady pace: {ring['area_acres']:,.1f} acres, as much as a circle of "
              f"{ring['equivalent_radius_m']:,.0f} m radius; it reaches farthest "
              f"{ring['max_reach_m']:,.0f} m at {ring['max_reach_bearing_deg']:.0f} deg."]
     if (ring.get("parts") or 1) > 1:
@@ -1908,7 +1908,7 @@ def _ring_shade(index: int, of: int) -> int:
 def rings_facts(rings: dict) -> list[dict]:
     """From an answered `rings_section`: each ring's area and reach."""
     return [{key: ring.get(key) for key in
-             ("minutes", "area_ha", "equivalent_radius_m", "max_reach_m", "reaches_edge")}
+             ("minutes", "area_acres", "equivalent_radius_m", "max_reach_m", "reaches_edge")}
             for ring in rings["rings"]]
 
 
@@ -1993,7 +1993,7 @@ MARKER_COLOURS: dict[str, str] = {
 #: What an urban assignment keeps in a section: the facts a planner hands a
 #: team by, never its polygon, its block names or its house markers -
 #: `get_candidate` returns those. `markers` (a count) only when asked for.
-URBAN_FACTS = ("streets", "blocks", "parcels", "buildings", "area_ha", "point",
+URBAN_FACTS = ("streets", "blocks", "parcels", "buildings", "area_acres", "point",
                "distance_from_center_m", "bearing_from_center_deg", "parts", "water_links",
                "markers")
 #: What the blocks keep in a section: populated_areas' counts. The blocks
@@ -2002,15 +2002,15 @@ BLOCK_COUNTS = ("count", "total_before_limit", "truncated_to", "parcels_built_up
                 "parcels_in_blocks", "parcels_left_out", "large_parcels", "markers")
 
 
-def check_target_ha(value) -> None:
-    """`target_ha`: None (the corpus median for the resource type) or a
+def check_target_acres(value) -> None:
+    """`target_acres`: None (the corpus median for the resource type) or a
     size above zero - urban_assignments refuses zero and below, and a NaN
     or an infinity would group every block into one or none."""
     if value is None:
         return
     if isinstance(value, bool) or not isinstance(value, (int, float)) \
             or not math.isfinite(value) or value <= 0:
-        raise ValueError(f"target_ha must be a number of hectares above zero, or null for "
+        raise ValueError(f"target_acres must be a number of acres above zero, or null for "
                          f"the corpus median of the resource type; got {value!r}")
 
 
@@ -2075,7 +2075,7 @@ def check_urban_radius(name: str, value: float, *, latitude: float, longitude: f
 
 
 def urban_section(ctx: ServerContext, handle: str, *, radius_m: float,
-                  target_ha: float | None, resource_type: str, building_markers: bool,
+                  target_acres: float | None, resource_type: str, building_markers: bool,
                   overrides: dict[str, dict[str, Any]]) -> Outcome:
     """`populated_areas`, then `urban_assignments`, on one staged ground,
     compact: the blocks' counts and set, and each assignment's facts without
@@ -2101,7 +2101,7 @@ def urban_section(ctx: ServerContext, handle: str, *, radius_m: float,
                         **(overrides.get("populated_areas") or {})}
     blocks = call_feature(ctx, "populated_areas", urban_feature.populated_areas,
                           blocks_arguments)
-    arguments = {"handle": handle, "target_ha": target_ha, "resource_type": resource_type,
+    arguments = {"handle": handle, "target_acres": target_acres, "resource_type": resource_type,
                  "max_distance_m": radius_m, "building_markers": building_markers,
                  **(overrides.get("urban_assignments") or {})}
     # What the section says of the two calls themselves, whether or not the
@@ -2134,8 +2134,8 @@ def urban_section(ctx: ServerContext, handle: str, *, radius_m: float,
         OK, warnings=warnings, handle=handle, set_id=payload["set_id"],
         created_at=payload.get("created_at"), reused=payload.get("reused"),
         assignments=[compact_urban(candidate) for candidate in payload["candidates"]],
-        count=summary.get("count"), target_ha=grouping.get("target_ha"),
-        target_source=grouping.get("target_source"), area_ha=summary.get("area_ha"),
+        count=summary.get("count"), target_acres=grouping.get("target_acres"),
+        target_source=grouping.get("target_source"), area_acres=summary.get("area_acres"),
         parcels=summary.get("parcels"), buildings=summary.get("buildings"),
         parcels_left_out=summary.get("parcels_left_out"),
         **({"markers": summary["markers"]} if "markers" in summary else {}),
@@ -2227,7 +2227,7 @@ def urban_facts(urban: dict) -> dict[str, Any]:
     median, max and the total, null when there are none), and the lots and
     buildings in them."""
     return {key: urban.get(key) for key in
-            ("count", "target_ha", "area_ha", "parcels", "buildings")}
+            ("count", "target_acres", "area_acres", "parcels", "buildings")}
 
 
 # --- An assignment's ground: metrics, coverage, features -----------------------
@@ -2354,7 +2354,7 @@ def compact_metrics(payload: dict) -> dict[str, Any]:
     are, the drainages without the repeated method, the traverse without its
     lookup tables, the routes counted by type and named rather than drawn,
     and every identified shape counted by kind - 140 KB of outlines on a
-    44 ha assignment, which say nothing here a count does not. The shape ids
+    109-acre assignment, which say nothing here a count does not. The shape ids
     are the features section's; `detail_call` returns the shapes."""
     quality = payload.get("data_quality") or {}
     traverse = payload.get("traverse") or {}
@@ -2490,10 +2490,8 @@ def coverage_section(ctx: ServerContext, handle: str, *, track_names: list[str],
 def _line_width_note(*, left_out: bool, saved: bool | None) -> str:
     """The warning a line assignment's coverage carries when this call's
     metrics did not give its corridor width: why they did not (`left_out`
-    of include, or failed), and which width coverage_for used instead.
-    coverage_for's own warning for the default corridor speaks to a command
-    line (`--corridor-width`), which no tool takes, so the scenario's own
-    remedy is said here."""
+    of include, or failed), which width coverage_for used instead, and -
+    when metrics were left out - the scenario's own remedy."""
     why = "metrics was left out of include" if left_out else "the metrics section failed"
     if saved:
         return (f"{why}, so this line's corridor width is the one terrain_metrics saved on "
@@ -2501,9 +2499,7 @@ def _line_width_note(*, left_out: bool, saved: bool | None) -> str:
     return (f"{why} and no metrics are saved on this ground, so this line's corridor is "
             "coverage_for's default width, as its own warning says"
             + (" - add \"metrics\" to include for the width this ground's vegetation gives"
-               if left_out else "")
-            + " (the --corridor-width that warning names is a command-line option; no tool "
-              "here takes it)")
+               if left_out else ""))
 
 
 def _total(items: list[dict], key: str, measure: str | None) -> float | None:

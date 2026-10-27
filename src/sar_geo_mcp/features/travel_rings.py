@@ -83,7 +83,7 @@ def register(mcp, ctx) -> None:
         EACH RING carries `minutes`; `geometry`, a WGS84 Polygon or
         MultiPolygon with holes where ground inside it cannot be reached in
         time (a cliff band, a lake); `outline`, the largest part's outer
-        boundary as a LineString - the loop to draw; `parts`; `area_ha`;
+        boundary as a LineString - the loop to draw; `parts`; `area_acres`;
         `equivalent_radius_m`, the radius of a circle of the same area;
         `max_reach_m`, `max_reach_bearing_deg` and `farthest_point`;
         `reach_by_direction_m`, the farthest reachable ground in each of the

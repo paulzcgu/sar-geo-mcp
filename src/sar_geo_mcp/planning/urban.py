@@ -4,12 +4,14 @@ size, the way a planner groups streets for a team.
 WHY GROUP
 ---------
 `populated_areas` draws one block per street run. In a dense suburb that is
-sixty blocks inside half a mile, from a 0.2 ha cul-de-sac to an 11 ha office
-park - not sixty assignments. A team is handed ground of roughly one size;
-this module merges neighbouring blocks into groups of about `target_ha`. The
-target defaults to the corpus median for the resource type
-(`norms.target_area_range_ha`, 10 ha for GROUND); the bayside-suburb test liked
-11.7 ha, the size of its largest single block. A type the corpus has no
+sixty blocks inside half a mile, from a half-acre cul-de-sac to a 27-acre
+office park - not sixty assignments. A team is handed ground of roughly one
+size; this module merges neighbouring blocks into groups of about
+`target_acres`. The target defaults to the corpus median for the resource type
+(`norms.target_area_range_ha`, 25 acres for GROUND); the bayside-suburb test
+liked 29 acres, the size of its largest single block. Areas are given in
+acres; the grouping itself works in hectares, the corpus's unit, and is
+converted where an answer is written. A type the corpus has no
 median for is sized by the median of every assignment, and the grouping's
 `target_source` and a warning say so: a typo must not read as a median.
 
@@ -60,6 +62,18 @@ fence between two streets for this).
   group the cut leaves in pieces keeps every piece that holds a block, and
   says so: the CalTopo export draws each piece as its own assignment.
 
+NEIGHBOURS SHARE ONE EDGE
+-------------------------
+Last, the outlines are snapped together (`snap_outlines`), as a planner
+draws them on CalTopo: the ground between two assignments no more than
+`SNAP_GAP_M` apart - the street, the boulevard, a fence line's strip - is
+split down its middle, every point going to the nearer, so the two share
+one edge, vertex for vertex, with no gap and no overlap. Only ground
+between two assignments is taken: an outer edge facing ground no other
+assignment is near stays at its back fences. Nothing a block holds moves,
+so the counts still describe the ground drawn; `area_acres` includes the
+street ground each assignment took.
+
 A group ignores the search circle: it holds whole blocks, and a block the
 circle reaches is kept whole, as `populated_areas` keeps it - the ring is
 extended out to the back fences beyond the nearest street, never cut.
@@ -72,7 +86,9 @@ import math
 from pathlib import Path
 from typing import Any
 
-from ..geo import ground_meters_per_mercator_unit, to_wgs84_geojson
+import numpy as np
+
+from ..geo import HA_PER_ACRE, acres, ground_meters_per_mercator_unit, to_wgs84_geojson
 
 #: OpenStreetMap road classes a group never crosses.
 ARTERIALS = frozenset({"motorway", "motorway_link", "trunk", "trunk_link", "primary",
@@ -103,6 +119,91 @@ FENCE_SHARE = 0.3
 WATER_GAP_M = 150.0
 #: Half-width of the strip that draws a water pair as one polygon.
 LINK_HALF_M = 6.0
+#: Ground between two assignments this close (ground metres, across) is
+#: split between them, so they share one edge: a residential street is 15
+#: to 25 m, a boulevard with a rail line beside it about 80.
+SNAP_GAP_M = 90.0
+#: ...and only where the two outlines lie on either side of it: the
+#: directions to the nearest point of each are at least this many degrees
+#: apart. Where two neighbours' outer corners meet, both lie to one side,
+#: and the ground beyond their outer edge is left alone.
+SNAP_OPPOSITE_DEG = 120.0
+#: Ground taken across a wider gap is opened by this radius, so the
+#: direction test's flicker along an outer edge leaves no spikes; a gap
+#: under SNAP_THIN_M across (a lot line, a fence strip) is always taken.
+SNAP_OPEN_M = 3.0
+SNAP_THIN_M = 8.0
+#: Ground metres per cell of the grid the gaps are split on, and the
+#: tolerance the shared edges are simplified to; coarser for a big town, so
+#: the grid stays under SNAP_MAX_SIDE_PX a side.
+SNAP_PIXEL_M = 1.0
+SNAP_MAX_SIDE_PX = 3000
+#: An outline's edge is drawn out to a street centreline this close
+#: (ground metres, edge to centreline): half a boulevard's right-of-way
+#: and a little for OpenStreetMap's line not lying in its middle.
+SNAP_STREET_M = 30.0
+#: ...where the street lies straight ahead of the edge: the directions from
+#: a cell to the outline and to the centreline at least this many degrees
+#: apart, so no finger runs along the street past the run (a junction's
+#: corner is filled by SNAP_CORNER_M2, a notch by SNAP_NOTCH_M, the rest
+#: of a city block by SNAP_FACE_SHARE).
+SNAP_FACING_DEG = 150.0
+#: A strip between two carriageways of one road no wider than this goes
+#: with the ground beside it: a boulevard's median.
+SNAP_MEDIAN_M = 20.0
+#: A piece of ground street centrelines and outlines enclose, no bigger
+#: than this (m2) - the corner of a junction - goes to the nearest of them.
+SNAP_CORNER_M2 = 600.0
+#: A notch in the assignments that opens onto a street - lots no run took,
+#: between two runs' ends and the cross street - is filled out to the
+#: street: ground a closing of this radius (ground metres) spans, no
+#: farther than SNAP_NOTCH_STREET_M from a centreline.
+SNAP_NOTCH_M = 45.0
+SNAP_NOTCH_STREET_M = 45.0
+#: Tolerance (ground metres) every outline is simplified to, as one
+#: coverage: a 1 m grid's staircase gone, a lot's corner kept.
+SNAP_SIMPLIFY_M = 2.0
+#: A city block - ground the centrelines enclose - this much of which the
+#: assignments already cover is theirs whole, each cell to the nearest: a
+#: lot no run took, a church yard, the strip a rule left between two of
+#: them. Its edges are then the streets round it.
+SNAP_FACE_SHARE = 0.6
+#: Ground metres each centreline is run on past its ends, to close the gap
+#: OpenStreetMap leaves at a T junction (as JUNCTION_M).
+SNAP_JUNCTION_M = 15.0
+#: Ground at least this share of whose surroundings (a square SNAP_POCKET_M
+#: either side) the assignments already cover is a pocket in them - a lot
+#: no run took, a slit between two of them, the corner of a city block -
+#: and goes to the nearest one in sight, in SNAP_POCKET_PASSES passes. A
+#: straight outer edge has under half its surroundings covered and stays.
+SNAP_POCKET_SHARE = 0.6
+SNAP_POCKET_M = 30.0
+SNAP_POCKET_PASSES = 2
+
+
+def _extended(line, distance: float):
+    """`line` (or each line of a MultiLineString) run on `distance` past
+    both ends, straight along its end segments."""
+    from shapely.geometry import LineString, MultiLineString
+
+    def one(part):
+        coords = list(part.coords)
+        if len(coords) < 2:
+            return part
+
+        def past(a, b):
+            dx, dy = a[0] - b[0], a[1] - b[1]
+            length = math.hypot(dx, dy) or 1.0
+            return (a[0] + dx / length * distance, a[1] + dy / length * distance)
+
+        return LineString([past(coords[0], coords[1])] + coords
+                          + [past(coords[-1], coords[-2])])
+
+    if line.geom_type == "LineString":
+        return one(line)
+    if line.geom_type == "MultiLineString":
+        return MultiLineString([one(part) for part in line.geoms])
+    return line
 
 NO_ARTERIALS_WARNING = ("the staged OpenStreetMap was fetched before road classes were "
                         "kept (query version {version}), so arterials are unknown and a "
@@ -110,8 +211,339 @@ NO_ARTERIALS_WARNING = ("the staged OpenStreetMap was fetched before road classe
 NO_OSM_WARNING = ("osm.json is missing from the staged ground, so arterials are unknown "
                   "and a group may cross a major road")
 
-__all__ = ["ARTERIALS", "group_blocks", "street_links", "urban_assignments", "urban_params",
-           "urban_set"]
+__all__ = ["ARTERIALS", "group_blocks", "snap_outlines", "street_links", "urban_assignments",
+           "urban_params", "urban_set"]
+
+
+def snap_outlines(geometries: list, *, scale: float, gap_m: float = SNAP_GAP_M,
+                  pixel_m: float = SNAP_PIXEL_M, streets=None) -> list:
+    """`geometries` (shapely, EPSG:3857, disjoint) grown into the ground
+    between them, so neighbours share one edge.
+
+    A point outside every outline is given to the nearest one when the
+    nearest two DIFFERENT outlines are within `gap_m` of it together and
+    lie on either side of it (the directions to them SNAP_OPPOSITE_DEG or
+    more apart): it lies across a gap no wider than that, between the two.
+    Ground no outline's edge can see out of - a pocket every side of which
+    is an outline - goes to the nearest too.
+
+    `streets` (shapely lines, EPSG:3857: the OpenStreetMap centrelines) are
+    the boundary wherever one runs through a gap. No gap is split across
+    one - two assignments either side of a street meet on its centreline -
+    and an edge that faces a street within SNAP_STREET_M is drawn out to
+    the centreline, so the end of a run lies on its cross street rather
+    than at the last lot. Split on a
+    `pixel_m` grid, the cells taken are vectorised from one label raster
+    and simplified as a coverage, so two neighbours' new edges are the same
+    line. Each outline keeps all its own ground and gives up none to
+    another, so what was disjoint stays disjoint and every block stays
+    where it was drawn. `scale` is ground metres per map unit. Returns the
+    geometries in the same order."""
+    import shapely
+    from affine import Affine
+    from rasterio.features import rasterize
+    from rasterio.features import shapes as rasterio_shapes
+    from scipy import ndimage
+    from shapely.geometry import MultiPolygon, Polygon
+    from shapely.geometry import shape as shapely_shape
+    from shapely.ops import unary_union
+
+    n = len(geometries)
+    if n < 2:
+        return list(geometries)
+    west, south, east, north = unary_union(geometries).bounds
+    span_m = max(east - west, north - south) * scale + 2 * gap_m
+    pixel_m = max(pixel_m, span_m / SNAP_MAX_SIDE_PX)
+    unit = pixel_m / scale
+    pad = gap_m / scale + 2 * unit
+    west, south, east, north = west - pad, south - pad, east + pad, north + pad
+    width = int(math.ceil((east - west) / unit))
+    height = int(math.ceil((north - south) / unit))
+    transform = Affine(unit, 0.0, west, 0.0, -unit, north)
+    labels = rasterize([(g, i + 1) for i, g in enumerate(geometries) if not g.is_empty],
+                       out_shape=(height, width), transform=transform, fill=0,
+                       dtype="int32")
+    # The nearest and second-nearest outline of every cell, by distance
+    # transforms over each outline's window only.
+    reach_px = int(math.ceil(gap_m / pixel_m)) + 2
+    shape = (height, width)
+    best = np.full(shape, np.inf, dtype=np.float32)
+    second = np.full(shape, np.inf, dtype=np.float32)
+    nearest = np.zeros(shape, dtype=np.int32)
+    # Where each cell's nearest and second-nearest outline lie, as row and
+    # column offsets from the cell.
+    best_dr, best_dc = np.zeros(shape, np.float32), np.zeros(shape, np.float32)
+    second_dr, second_dc = np.zeros(shape, np.float32), np.zeros(shape, np.float32)
+    for i in range(1, n + 1):
+        rows, cols = np.nonzero(labels == i)
+        if rows.size == 0:
+            continue
+        r0, r1 = max(rows.min() - reach_px, 0), min(rows.max() + reach_px + 1, height)
+        c0, c1 = max(cols.min() - reach_px, 0), min(cols.max() + reach_px + 1, width)
+        distance, (near_r, near_c) = ndimage.distance_transform_edt(
+            labels[r0:r1, c0:c1] != i, return_indices=True)
+        distance = distance.astype(np.float32) * pixel_m
+        grid_r, grid_c = np.indices(distance.shape)
+        dr, dc = (near_r - grid_r).astype(np.float32), (near_c - grid_c).astype(np.float32)
+        window = (slice(r0, r1), slice(c0, c1))
+        b, s, k = best[window], second[window], nearest[window]
+        bdr, bdc, sdr, sdc = (best_dr[window], best_dc[window], second_dr[window],
+                              second_dc[window])
+        closer = distance < b
+        runner_up = ~closer & (distance < s)
+        # The old nearest becomes the second where this one is closer.
+        s[closer], sdr[closer], sdc[closer] = b[closer], bdr[closer], bdc[closer]
+        s[runner_up], sdr[runner_up], sdc[runner_up] = (
+            distance[runner_up], dr[runner_up], dc[runner_up])
+        b[closer], bdr[closer], bdc[closer] = distance[closer], dr[closer], dc[closer]
+        k[closer] = i
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cosine = ((best_dr * second_dr + best_dc * second_dc)
+                  / (np.hypot(best_dr, best_dc) * np.hypot(second_dr, second_dc)))
+    opposite = np.nan_to_num(cosine, nan=1.0) <= math.cos(math.radians(SNAP_OPPOSITE_DEG))
+    street = np.zeros(shape, dtype=bool)
+    if streets:
+        # Each line run on past its ends by a junction's reach: OpenStreetMap
+        # draws a T junction's stem ending a few metres short of the through
+        # road, which would leave the city blocks either side joined.
+        lines = [(_extended(line, SNAP_JUNCTION_M / scale), 1) for line in streets
+                 if not line.is_empty]
+        if lines:
+            street = rasterize(lines, out_shape=shape, transform=transform, fill=0,
+                               all_touched=True, dtype="uint8") > 0
+    street &= labels == 0
+    # The ground between outlines, in pieces the centrelines bound (an
+    # all-touched line is watertight to 4-connected ground), and which
+    # outlines and whether a street each piece touches.
+    pieces, n_pieces = ndimage.label((labels == 0) & ~street)
+    beside: dict[int, set[int]] = {}
+    on_street = np.zeros(n_pieces + 1, dtype=bool)
+    for axis in (0, 1):
+        for step in (1, -1):
+            other_label = np.roll(labels, step, axis=axis)
+            other_street = np.roll(street, step, axis=axis)
+            touching = (pieces > 0) & (other_label > 0)
+            for piece, label in set(zip(pieces[touching].tolist(),
+                                        other_label[touching].tolist())):
+                beside.setdefault(piece, set()).add(label)
+            on_street[np.unique(pieces[(pieces > 0) & other_street])] = True
+    on_street[0] = False
+    # Whether each cell's nearest outline is one its piece touches: an
+    # outline across a centreline is not this ground's.
+    # Whether the straight line from a cell to the point (dr, dc) cells
+    # away crosses no centreline: ground goes only to an outline on its own
+    # side of the street. A line of sight rather than which piece of ground
+    # a cell is in, because a street that ends - a dead end, the edge of
+    # the staged ground - leaves the pieces either side joined round its end.
+    def in_sight(dr, dc, cells):
+        rows, cols = np.nonzero(cells)
+        clear = np.ones(rows.size, dtype=bool)
+        if rows.size:
+            vr, vc = dr[rows, cols], dc[rows, cols]
+            # Half-cell steps: an all-touched line has no gap to slip through.
+            steps = int(math.ceil(2 * max(np.abs(vr).max(), np.abs(vc).max(), 1.0)))
+            for k in range(1, steps):
+                t = k / steps
+                sample_r = np.clip(np.rint(rows + t * vr).astype(np.int64), 0, height - 1)
+                sample_c = np.clip(np.rint(cols + t * vc).astype(np.int64), 0, width - 1)
+                clear &= ~street[sample_r, sample_c]
+        out = np.zeros(shape, dtype=bool)
+        out[rows[clear], cols[clear]] = True
+        return out
+
+    open_ground = (labels == 0) & ~street
+    pairs = in_sight(best_dr, best_dc, open_ground & (best <= gap_m))
+
+    across = best + second
+    # Between two outlines: both in sight, so a gap is never bridged round
+    # the mouth of the street that divides it.
+    between = pairs & (across <= gap_m) & opposite
+    between = in_sight(second_dr, second_dc, between)
+    street_distance = np.full(shape, np.inf, dtype=np.float64)
+    if street.any():
+        street_distance, (street_r, street_c) = ndimage.distance_transform_edt(
+            ~street, return_indices=True)
+        grid_r, grid_c = np.indices(shape)
+        to_street_r = (street_r - grid_r).astype(np.float32)
+        to_street_c = (street_c - grid_c).astype(np.float32)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            facing = ((best_dr * to_street_r + best_dc * to_street_c)
+                      / (np.hypot(best_dr, best_dc) * np.hypot(to_street_r, to_street_c)))
+        towards = (pairs
+                   & (best + street_distance * pixel_m <= SNAP_STREET_M)
+                   & (np.nan_to_num(facing, nan=-1.0)
+                      <= math.cos(math.radians(SNAP_FACING_DEG))))
+        between |= towards
+        # A notch opening onto the street, filled out to it.
+        notch_px = SNAP_NOTCH_M / pixel_m
+        spanned = ndimage.distance_transform_edt(
+            ndimage.distance_transform_edt(labels == 0) <= notch_px) > notch_px
+        between |= (pairs & spanned
+                    & (street_distance * pixel_m <= SNAP_NOTCH_STREET_M))
+    open_px = SNAP_OPEN_M / pixel_m
+    if open_px >= 1:
+        eroded = ndimage.distance_transform_edt(between) > open_px
+        between = ndimage.distance_transform_edt(~eroded) <= open_px
+    between &= pairs
+    between |= pairs & (across <= SNAP_THIN_M)
+    # The corner of a junction: a small piece the centrelines cut off beside
+    # one outline goes to it whole.
+    if n_pieces:
+        piece_m2 = np.bincount(pieces.ravel(), minlength=n_pieces + 1) * pixel_m * pixel_m
+        corner = np.zeros(n_pieces + 1, dtype=bool)
+        corner[1:] = piece_m2[1:] <= SNAP_CORNER_M2
+        for piece in range(1, n_pieces + 1):
+            if corner[piece] and not beside.get(piece):
+                corner[piece] = False
+        between |= (open_ground & corner[pieces]) & (pairs | (best <= gap_m))
+    filled = np.where(labels > 0, labels, np.where(between, nearest, 0)).astype(np.int32)
+    # Once more out to the street from the ground now drawn: a notch filled
+    # above can stop a few metres short of its centreline.
+    if street.any():
+        drawn_distance, (drawn_r, drawn_c) = ndimage.distance_transform_edt(
+            filled == 0, return_indices=True)
+        grid_r, grid_c = np.indices(shape)
+        to_drawn_r = (drawn_r - grid_r).astype(np.float32)
+        to_drawn_c = (drawn_c - grid_c).astype(np.float32)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            facing = ((to_drawn_r * to_street_r + to_drawn_c * to_street_c)
+                      / (np.hypot(to_drawn_r, to_drawn_c) * np.hypot(to_street_r, to_street_c)))
+        owner = filled[drawn_r, drawn_c]
+        again = ((filled == 0) & open_ground
+                 & ((drawn_distance + street_distance) * pixel_m <= SNAP_STREET_M)
+                 & (np.nan_to_num(facing, nan=-1.0)
+                    <= math.cos(math.radians(SNAP_FACING_DEG))))
+        again = in_sight(to_drawn_r, to_drawn_c, again)
+        filled[again] = owner[again]
+        pairs |= again
+    # A city block mostly covered already is covered whole.
+    if street.any():
+        faces, n_faces = ndimage.label(~street)
+        size = np.bincount(faces.ravel(), minlength=n_faces + 1)
+        covered = np.bincount(faces[filled > 0], minlength=n_faces + 1)
+        # Not one open to the edge of the grid: that is the ground round
+        # the town, however little of it the grid holds.
+        border_faces = np.unique(np.concatenate([faces[0], faces[-1], faces[:, 0],
+                                                 faces[:, -1]]))
+        whole = np.zeros(n_faces + 1, dtype=bool)
+        whole[1:] = covered[1:] >= SNAP_FACE_SHARE * size[1:]
+        whole[border_faces] = False
+        for face in np.flatnonzero(whole & (covered < size)):
+            rows, cols = np.nonzero(faces == face)
+            r0, r1, c0, c1 = rows.min(), rows.max() + 1, cols.min(), cols.max() + 1
+            inside = faces[r0:r1, c0:c1] == face
+            local = filled[r0:r1, c0:c1]
+            drawn_here = inside & (local > 0)
+            _d, (near_r, near_c) = ndimage.distance_transform_edt(~drawn_here,
+                                                                  return_indices=True)
+            empty = inside & (local == 0)
+            local[empty] = local[near_r[empty], near_c[empty]]
+            pairs[r0:r1, c0:c1] |= empty
+    # Pockets, by the share of their surroundings already covered.
+    window_px = int(2 * round(SNAP_POCKET_M / pixel_m) + 1)
+    for _ in range(SNAP_POCKET_PASSES):
+        drawn = filled > 0
+        share = ndimage.uniform_filter(drawn.astype(np.float32), size=window_px,
+                                       mode="constant")
+        pocket = ~drawn & open_ground & (share >= SNAP_POCKET_SHARE)
+        if not pocket.any():
+            break
+        _d, (near_r, near_c) = ndimage.distance_transform_edt(~drawn, return_indices=True)
+        grid_r, grid_c = np.indices(shape)
+        pocket = in_sight((near_r - grid_r).astype(np.float32),
+                          (near_c - grid_c).astype(np.float32), pocket)
+        filled[pocket] = filled[near_r[pocket], near_c[pocket]]
+        pairs |= pocket
+    # Each outline's new ground smoothed - closed, then opened - so the
+    # direction tests' flicker leaves no notch or scallop on its edge. Two
+    # outlines' smoothing never takes the other's ground.
+    smooth_px = SNAP_OPEN_M / pixel_m
+    if smooth_px >= 1:
+        for i in range(1, n + 1):
+            grown = filled == i
+            if not grown.any():
+                continue
+            rows, cols = np.nonzero(grown)
+            pad_px = int(math.ceil(smooth_px)) + 2
+            r0, r1 = max(rows.min() - pad_px, 0), min(rows.max() + pad_px + 1, height)
+            c0, c1 = max(cols.min() - pad_px, 0), min(cols.max() + pad_px + 1, width)
+            local = grown[r0:r1, c0:c1]
+            closed = ndimage.distance_transform_edt(
+                ndimage.distance_transform_edt(~local) <= smooth_px) > smooth_px
+            closed |= local
+            opened = ndimage.distance_transform_edt(
+                ~(ndimage.distance_transform_edt(closed) > smooth_px)) <= smooth_px
+            # Thin ground along a street - out to its centreline - is kept;
+            # a spike out into open ground is not.
+            along = local & (street_distance[r0:r1, c0:c1] * pixel_m <= SNAP_OPEN_M + pixel_m)
+            mine = (opened & closed) | along | (labels[r0:r1, c0:c1] == i)
+            free = (filled[r0:r1, c0:c1] == 0) | (filled[r0:r1, c0:c1] == i)
+            window = filled[r0:r1, c0:c1]
+            window[local & ~mine & (labels[r0:r1, c0:c1] == 0)] = 0
+            window[mine & free & pairs[r0:r1, c0:c1]] = i
+    # A pocket of no one's ground with outlines all round it and no street
+    # through it goes to the nearest: a lot no block took, a courtyard the
+    # closing did not span.
+    pockets, _count = ndimage.label(filled == 0)
+    edge = np.unique(np.concatenate([pockets[0], pockets[-1], pockets[:, 0],
+                                     pockets[:, -1]]))
+    with_street = np.unique(pockets[street])
+    enclosed = (pockets > 0) & ~np.isin(pockets, edge) & ~np.isin(pockets, with_street)
+    filled[enclosed] = nearest[enclosed]
+    # The centreline itself goes to an outline drawn up to it, so two that
+    # meet on a street leave no line of no one's ground between them.
+    if street.any():
+        _d, (fill_r, fill_c) = ndimage.distance_transform_edt(filled == 0,
+                                                              return_indices=True)
+        line = street & (_d <= 2)
+        filled[line] = filled[fill_r[line], fill_c[line]]
+        # Ground near a centreline that assignments lie either side of - a
+        # boulevard's median, the corner of a junction - goes with the
+        # nearest. A closing of the ground drawn: never on past their ends.
+        reach = SNAP_MEDIAN_M / 2 / pixel_m
+        drawn = filled > 0
+        spans = ndimage.distance_transform_edt(
+            ndimage.distance_transform_edt(~drawn) <= reach) > reach
+        median = ~drawn & spans & (street_distance * pixel_m <= SNAP_MEDIAN_M / 2)
+        if median.any():
+            _d, (fill_r, fill_c) = ndimage.distance_transform_edt(~drawn, return_indices=True)
+            owner = filled[fill_r, fill_c]
+            # Never across a centreline: a median (no outline beside it)
+            # goes to either side, other ground only to its own side's.
+            lonely = np.ones(n_pieces + 1, dtype=bool)
+            lonely[list(beside)] = False
+            lonely[0] = False
+            grid_r, grid_c = np.indices(shape)
+            own_side = in_sight((fill_r - grid_r).astype(np.float32),
+                                (fill_c - grid_c).astype(np.float32), median & ~lonely[pieces])
+            median &= lonely[pieces] | own_side
+            filled[median] = owner[median]
+    # One label raster vectorised: neighbours' edges are the same cell edges.
+    tiles: list[list] = [[] for _ in range(n)]
+    for geom, value in rasterio_shapes(filled, mask=filled > 0, transform=transform):
+        tiles[int(value) - 1].append(shapely_shape(geom))
+    merged = [unary_union(parts) if parts else Polygon() for parts in tiles]
+    # Simplified as one coverage, so a shared edge stays one line, vertex
+    # for vertex. Every outline is drawn from it alone - its own blocks
+    # included - so no edge keeps the staircase of the grid it was read on.
+    simplified = list(shapely.coverage_simplify(np.array(merged, dtype=object),
+                                                SNAP_SIMPLIFY_M / scale))
+    result = []
+    for i, geometry in enumerate(geometries):
+        tile = shapely.make_valid(simplified[i])
+        others = unary_union([g for j, g in enumerate(simplified) if j != i])
+        parts = [tile] if tile.geom_type == "Polygon" else [
+            part for part in getattr(tile, "geoms", []) if part.geom_type == "Polygon"]
+        # Only pieces holding some of its own ground: never a stray cell.
+        keep = [part for part in parts if part.intersection(geometry).area > 0]
+        # A hole with no other outline in it is a cul-de-sac's turning
+        # circle or a yard the grid missed: it is this assignment's ground.
+        keep = [Polygon(part.exterior, [ring for ring in part.interiors
+                                        if Polygon(ring).intersects(others)])
+                for part in keep]
+        result.append(keep[0] if len(keep) == 1 else MultiPolygon(keep) if keep
+                      else geometry)
+    return result
 
 
 def _arterials(payload: dict | None) -> tuple[Any, str | None]:
@@ -120,7 +552,7 @@ def _arterials(payload: dict | None) -> tuple[Any, str | None]:
     from shapely.geometry import shape as shapely_shape
     from shapely.ops import unary_union
 
-    from ..terrain.linear import OSM_QUERY_VERSION_ROUTE_TAGS
+    from ..sources.osm import OSM_QUERY_VERSION_ROUTE_TAGS
 
     if payload is None:
         return None, NO_OSM_WARNING
@@ -360,7 +792,7 @@ def group_blocks(shapes: list, *, target_ha: float, scale: float, arterials=None
     # outline reaches most of it (on a tie the larger, then the one met
     # first), to be counted and drawn there. Decided by share, not by
     # whether anything is left over: a block 2 m proud of a slot's mouth,
-    # drawn on its own, was the 2 m strip outside - a 0.0 ha assignment
+    # drawn on its own, was the 2 m strip outside - a 0.0-acre assignment
     # carrying every house, while the houses were drawn in the larger
     # group's outline and left out of its counts - and one flush with the
     # mouth joined. Centimetres must not flip that. A hemmed join is not
@@ -440,12 +872,13 @@ def group_blocks(shapes: list, *, target_ha: float, scale: float, arterials=None
     return result
 
 
-def urban_params(*, target_ha: float | None, resource_type: str, max_distance_m: float | None,
+def urban_params(*, target_acres: float | None, resource_type: str,
+                 max_distance_m: float | None,
                  building_markers: bool = False, marker_color: str = "#FFFFFF",
                  norms: dict | None = None) -> dict:
     """The parameters an urban set id is hashed over.
 
-    With no `target_ha` the target is the norms' median for the resource
+    With no `target_acres` the target is the norms' median for the resource
     type, so the norms decide the grouping, and their digest
     (`norms.norms_digest`; `norms` None is the shipped file) is hashed in.
     Without it a server restarted with another agency's `--norms` over the
@@ -464,10 +897,10 @@ def urban_params(*, target_ha: float | None, resource_type: str, max_distance_m:
     # The grouping method and the blocks' together: a set grouped back to
     # back, or over blocks drawn the older way, is grouped again (0.35.0).
     params = {"method": METHOD,
-              "target_ha": None if target_ha is None else float(target_ha),
+              "target_acres": None if target_acres is None else float(target_acres),
               "resource_type": (resource_type or "GROUND").strip().upper(),
               "max_distance_m": None if max_distance_m is None else float(max_distance_m)}
-    if target_ha is None:
+    if target_acres is None:
         params["norms_digest"] = norms_digest(norms if norms is not None else load_norms())
     if building_markers:
         params["building_markers"] = True
@@ -475,14 +908,14 @@ def urban_params(*, target_ha: float | None, resource_type: str, max_distance_m:
     return params
 
 
-def urban_assignments(directory, *, target_ha: float | None = None,
+def urban_assignments(directory, *, target_acres: float | None = None,
                       resource_type: str = "GROUND", norms: dict | None = None,
                       max_distance_m: float | None = None,
                       building_markers: bool = False, marker_color: str = "#FFFFFF",
                       wms_base_url: str | None = None, cache_dir: Path | None = None,
                       fetch=None) -> dict[str, Any]:
     """The populated blocks of the ground staged under `directory`, grouped
-    into assignments of about `target_ha` (default: the corpus median for
+    into assignments of about `target_acres` (default: the corpus median for
     `resource_type`, or of every assignment - with a warning - for a type
     the corpus has no median for), nearest the centre first.
 
@@ -504,6 +937,10 @@ def urban_assignments(directory, *, target_ha: float | None = None,
     resource = (resource_type or "GROUND").strip().upper()
     target_source = "given"
     sizing_warning = None
+    if target_acres is not None and not target_acres > 0:
+        raise ValueError(f"target_acres ({target_acres}) must be above zero")
+    # The grouping works in hectares, the corpus's unit.
+    target_ha = None if target_acres is None else float(target_acres) * HA_PER_ACRE
     if target_ha is None:
         target = target_area_range_ha(resource, norms)
         target_ha = float(target["p50"])
@@ -517,12 +954,13 @@ def urban_assignments(directory, *, target_ha: float | None = None,
             target_source = f"corpus median of every assignment (none for {resource})"
             sizing_warning = (f"the assignment corpus has no median for resource type "
                               f"{resource!r}, so the assignments are sized toward the median "
-                              f"of every assignment, {target_ha:g} ha; it has one for "
+                              f"of every assignment, {target_ha / HA_PER_ACRE:.1f} acres; "
+                              f"it has one for "
                               f"{known or 'no type'} - check the type is the one meant")
         else:
             target_source = f"corpus median for {resource}"
     if target_ha <= 0:
-        raise ValueError(f"target_ha ({target_ha}) must be above zero")
+        raise ValueError(f"target_acres ({target_ha / HA_PER_ACRE:g}) must be above zero")
 
     populated = populated_areas(directory, max_distance_m=max_distance_m,
                                 building_markers=building_markers, marker_color=marker_color,
@@ -548,6 +986,10 @@ def urban_assignments(directory, *, target_ha: float | None = None,
                          _streets(payload), scale=scale)
     groups = group_blocks(shapes, target_ha=target_ha, scale=scale, arterials=arterials,
                           street_links=links)
+    street_lines = [line for lines in _streets(payload).values() for line in lines]
+    for group, snapped in zip(groups, snap_outlines([g["geometry"] for g in groups],
+                                                    scale=scale, streets=street_lines)):
+        group["geometry"] = snapped
 
     geod = Geod(ellps="WGS84")
     entries = []
@@ -571,7 +1013,7 @@ def urban_assignments(directory, *, target_ha: float | None = None,
             "blocks": len(members),
             "parcels": int(sum(blocks[m]["facts"]["parcels"] for m in members)),
             "buildings": int(sum(blocks[m]["facts"]["buildings"] for m in members)),
-            "area_ha": round(geometry.area * scale * scale / 10_000, 2),
+            "area_acres": round(acres(geometry.area * scale * scale), 2),
             "point": {"latitude": latitude, "longitude": longitude},
             "distance_from_center_m": round(distance_m, 0),
             "bearing_from_center_deg": round(bearing % 360.0, 0),
@@ -600,8 +1042,9 @@ def urban_assignments(directory, *, target_ha: float | None = None,
             group_warnings.append(
                 f"{listed}, most of whose ground lies inside this assignment's outline (in a "
                 f"courtyard or slot of its blocks), {'is' if len(names) == 1 else 'are'} "
-                f"counted and drawn here; that takes its blocks to {block_ha:.2f} ha, past "
-                f"the {ceiling_ha:.2f} ha ({MAX_SHARE * 100:g} % of the target) a merge "
+                f"counted and drawn here; that takes its blocks to "
+                f"{block_ha / HA_PER_ACRE:.1f} acres, past the {ceiling_ha / HA_PER_ACRE:.1f} "
+                f"acres ({MAX_SHARE * 100:g} % of the target) a merge "
                 "stops at")
         entry = {"name": streets[0] + (f" +{len(streets) - 1}" if len(streets) > 1 else ""),
                  "blocks": [blocks[m]["name"] for m in members], "facts": facts,
@@ -613,11 +1056,11 @@ def urban_assignments(directory, *, target_ha: float | None = None,
         entries.append(entry)
     entries.sort(key=lambda entry: (entry.pop("_distance"), entry["name"]))
 
-    sizes = [entry["facts"]["area_ha"] for entry in entries]
+    sizes = [entry["facts"]["area_acres"] for entry in entries]
     summary = {
         "count": len(entries), "blocks": len(blocks),
-        "target_ha": round(target_ha, 2),
-        "area_ha": {"min": min(sizes), "median": sorted(sizes)[len(sizes) // 2],
+        "target_acres": round(target_ha / HA_PER_ACRE, 1),
+        "area_acres": {"min": min(sizes), "median": sorted(sizes)[len(sizes) // 2],
                     "max": max(sizes), "total": round(sum(sizes), 1)} if sizes else None,
         "parcels": int(sum(entry["facts"]["parcels"] for entry in entries)),
         "buildings": int(sum(entry["facts"]["buildings"] for entry in entries)),
@@ -628,21 +1071,23 @@ def urban_assignments(directory, *, target_ha: float | None = None,
     assumptions = {
         **populated["assumptions"],
         "grouping": {
-            "target_ha": round(target_ha, 2), "target_source": target_source,
-            "max_ha": round(target_ha * MAX_SHARE, 2),
-            "settled_ha": round(target_ha * SETTLED_SHARE, 2),
+            "target_acres": round(target_ha / HA_PER_ACRE, 1), "target_source": target_source,
+            "max_acres": round(target_ha * MAX_SHARE / HA_PER_ACRE, 1),
+            "settled_acres": round(target_ha * SETTLED_SHARE / HA_PER_ACRE, 1),
             "neighbour_gap_m": NEIGHBOUR_GAP_M, "close_m": CLOSE_M,
-            "water_gap_m": WATER_GAP_M,
+            "water_gap_m": WATER_GAP_M, "snap_gap_m": SNAP_GAP_M,
             "arterials": sorted(ARTERIALS) if arterials is not None or not arterial_warning
             else "unknown",
             "junction_m": JUNCTION_M, "junction_reach_m": JUNCTION_REACH_M,
-            "fence_ha": round(target_ha * FENCE_SHARE, 2),
+            "fence_acres": round(target_ha * FENCE_SHARE / HA_PER_ACRE, 1),
             "rule": ("each block is one street, both sides, back fence to back fence; blocks "
                      "merge smallest first along the streets that join them (a cul-de-sac "
                      "into the road it opens onto) into the most compact shape, never across "
-                     "an arterial; a group still under fence_ha with no street to grow along "
+                     "an arterial; a group still under fence_acres with no street to grow along "
                      "joins a block it backs onto; small groups then pair across water, two "
-                     "at most; whole blocks only"),
+                     "at most; whole blocks only; the ground between two assignments up to "
+                     "snap_gap_m apart is split down its middle, so neighbours share one "
+                     "edge"),
         },
     }
     return {"assignments": entries, "summary": summary, "assumptions": assumptions,

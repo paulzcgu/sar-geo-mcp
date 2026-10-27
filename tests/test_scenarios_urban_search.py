@@ -24,6 +24,8 @@ from pathlib import Path
 
 import httpx
 import pytest
+
+from sar_geo_mcp.geo import HA_PER_ACRE
 from test_medical import FakeServices, record
 from test_scenarios_initial_response import AreaStaging, _square, _stage_without_osm
 from test_scenarios_sections import FakeStaging, geometry_types_in
@@ -85,10 +87,10 @@ def urban_set(handle: str, arguments: dict) -> CandidateSet:
                                 "marker-color": "#FFFFFF", "marker-size": 1}}
                 for i in range(count)] if markers else None
 
-    def facts(streets, blocks, parcels, buildings, area_ha, distance, bearing, names, *,
+    def facts(streets, blocks, parcels, buildings, area_acres, distance, bearing, names, *,
               parts=1, water=0, dx=0.0):
         return {"streets": streets, "blocks": blocks, "parcels": parcels,
-                "buildings": buildings, "area_ha": area_ha,
+                "buildings": buildings, "area_acres": area_acres,
                 "point": {"latitude": lat + 0.001, "longitude": lon + dx},
                 "distance_from_center_m": distance, "bearing_from_center_deg": bearing,
                 "water_links": water, "parts": parts, "block_names": names}
@@ -119,21 +121,21 @@ def urban_set(handle: str, arguments: dict) -> CandidateSet:
             id=f"{URBAN_SET}.{index}", kind="assignment", axis="urban", axis_ids=[],
             sources=["parcel", "structures", "osm"], name=name, geometry=geometry,
             facts=fact, norm_flags=[], warnings=warnings, markers=drawn))
-    target = arguments.get("target_ha")
-    summary = {"count": 3, "blocks": 9, "target_ha": target or 10.0,
-               "area_ha": {"min": 4.2, "median": 9.7, "max": 11.21, "total": 25.1},
+    target = arguments.get("target_acres")
+    summary = {"count": 3, "blocks": 9, "target_acres": target or 10.0,
+               "area_acres": {"min": 4.2, "median": 9.7, "max": 11.21, "total": 25.1},
                "parcels": 316, "buildings": 180, "parcels_left_out": 34,
                "center": {"latitude": lat, "longitude": lon}}
     if markers:
         summary["markers"] = 6
     return CandidateSet(
-        set_id=URBAN_SET, tool="urban_assignments", params={"target_ha": target},
+        set_id=URBAN_SET, tool="urban_assignments", params={"target_acres": target},
         handle=handle, created_at="2026-10-22T09:00:00+00:00", candidates=candidates,
         summary=summary,
         assumptions={"pixel_m": 1.0, "grouping": {
-            "target_ha": target or 10.0,
+            "target_acres": target or 10.0,
             "target_source": "given" if target else "corpus median for GROUND",
-            "max_ha": 14.0, "settled_ha": 6.0, "arterials": ["primary", "secondary"]}},
+            "max_acres": 14.0, "settled_acres": 6.0, "arterials": ["primary", "secondary"]}},
         warnings=[LOTS_WARNING], map_version=None)
 
 
@@ -216,7 +218,7 @@ class Stubs:
         self.calls["grouping"].append(arguments)
         resolved = ctx.staged(arguments["handle"])
         if "grouping" in self.fail:
-            raise ValueError("target_ha (0.0) must be above zero")
+            raise ValueError("target_acres (0.0) must be above zero")
         cset = urban_set(arguments["handle"], arguments)
         save_set(resolved.directory, cset)
         payload = cset.model_dump(exclude={"candidates", "manifest_stamp", "map_version"})
@@ -291,7 +293,7 @@ def test_every_section_answers_and_the_summary_reads_the_facts(ctx, monkeypatch)
     # The blocks first, then the grouping, both keeping the search circle's.
     assert stubs.calls["blocks"] == [{"handle": handle, "max_distance_m": HALF_MILE,
                                       "building_markers": False}]
-    assert stubs.calls["grouping"] == [{"handle": handle, "target_ha": None,
+    assert stubs.calls["grouping"] == [{"handle": handle, "target_acres": None,
                                         "resource_type": "GROUND", "max_distance_m": HALF_MILE,
                                         "building_markers": False}]
     urban = sections["urban"]
@@ -301,7 +303,7 @@ def test_every_section_answers_and_the_summary_reads_the_facts(ctx, monkeypatch)
     first, pieces, water = urban["assignments"]
     assert first == {"id": f"{URBAN_SET}.1", "name": "Laurel Street +2",
                      "streets": ["Laurel Street", "Olive Street", "Walnut Street"],
-                     "blocks": 4, "parcels": 120, "buildings": 96, "area_ha": 9.7,
+                     "blocks": 4, "parcels": 120, "buildings": 96, "area_acres": 9.7,
                      "point": {"latitude": SAN_CARLOS[0] + 0.001,
                                "longitude": SAN_CARLOS[1]},
                      "distance_from_center_m": 110.0, "bearing_from_center_deg": 30.0,
@@ -309,9 +311,9 @@ def test_every_section_answers_and_the_summary_reads_the_facts(ctx, monkeypatch)
     assert pieces["parts"] == 2 and pieces["warnings"] == [PIECES_WARNING]
     assert water["water_links"] == 1 and water["warnings"] == [WATER_WARNING]
     assert not any("block_names" in a or "markers" in a for a in urban["assignments"])
-    assert urban["count"] == 3 and urban["target_ha"] == 10.0
+    assert urban["count"] == 3 and urban["target_acres"] == 10.0
     assert urban["target_source"] == "corpus median for GROUND"
-    assert urban["area_ha"] == {"min": 4.2, "median": 9.7, "max": 11.21, "total": 25.1}
+    assert urban["area_acres"] == {"min": 4.2, "median": 9.7, "max": 11.21, "total": 25.1}
     assert (urban["parcels"], urban["buildings"], urban["parcels_left_out"]) == (316, 180, 34)
     assert "markers" not in urban
     assert urban["warnings"] == [LOTS_WARNING, "arterials checked against query version 5"]
@@ -356,8 +358,8 @@ def test_every_section_answers_and_the_summary_reads_the_facts(ctx, monkeypatch)
 
     summary = result["summary"]
     assert set(summary) == {"urban", "parking", "medical"}
-    assert summary["urban"] == {"count": 3, "target_ha": 10.0,
-                                "area_ha": {"min": 4.2, "median": 9.7, "max": 11.21,
+    assert summary["urban"] == {"count": 3, "target_acres": 10.0,
+                                "area_acres": {"min": 4.2, "median": 9.7, "max": 11.21,
                                             "total": 25.1},
                                 "parcels": 316, "buildings": 180}
     assert summary["parking"]["nearest"]["name"] == "Library lot"
@@ -383,11 +385,11 @@ def test_the_answer_carries_points_but_no_lines_or_polygons(ctx, monkeypatch,
 def test_house_markers_only_when_asked_for_and_then_in_the_drafts(ctx, monkeypatch):
     stubs = Stubs(monkeypatch)
     result = plan_urban_search(ctx, *SAN_CARLOS, building_markers=True, resource_type="DOG",
-                               target_ha=6.0)
+                               target_acres=6.0)
     assert stubs.calls["blocks"][0]["building_markers"] is True
     grouping = stubs.calls["grouping"][0]
     assert (grouping["building_markers"], grouping["resource_type"],
-            grouping["target_ha"]) == (True, "DOG", 6.0)
+            grouping["target_acres"]) == (True, "DOG", 6.0)
     urban = result["sections"]["urban"]
     assert [a["markers"] for a in urban["assignments"]] == [3, 2, 1]
     assert urban["markers"] == 6
@@ -528,7 +530,7 @@ def test_the_grouping_failing_after_the_blocks_keeps_its_call_and_the_blocks(
     result = plan_urban_search(ctx, *SAN_CARLOS, include=include)
     urban = result["sections"]["urban"]
     assert urban["status"] == "failed"
-    assert urban["error"] == "ValueError: target_ha (0.0) must be above zero"
+    assert urban["error"] == "ValueError: target_acres (0.0) must be above zero"
     assert urban["detail_call"] == {"tool": "urban_assignments",
                                     "arguments": stubs.calls["grouping"][0]}
     assert len(stubs.calls["blocks"]) == 1
@@ -751,7 +753,7 @@ def test_urban_overrides_go_by_tool_to_each_call_and_its_detail_call(ctx, monkey
     handle = result["handles"]["search"]
     assert stubs.calls["blocks"] == [{"handle": handle, "max_distance_m": 600,
                                       "building_markers": False, "limit": 50}]
-    assert stubs.calls["grouping"] == [{"handle": handle, "target_ha": None,
+    assert stubs.calls["grouping"] == [{"handle": handle, "target_acres": None,
                                         "resource_type": "GROUND", "max_distance_m": 600,
                                         "building_markers": False}]
     urban = result["sections"]["urban"]
@@ -912,10 +914,10 @@ def test_a_unit_beside_radius_m_is_refused_before_any_work(ctx, monkeypatch, arg
     ({"urban": {"urban_assignments": {"min_parcels": 2}}},
      r"overrides\['urban'\]\['urban_assignments'\] names \['min_parcels'\], which "
      r"urban_assignments does not take here; it accepts \['max_distance_m', 'marker_color'\]"),
-    # populated_areas takes no target_ha or resource_type at all: refused as
+    # populated_areas takes no target_acres or resource_type at all: refused as
     # a stranger, with what it does take - not as the scenario's to set.
-    ({"urban": {"populated_areas": {"target_ha": 5}}},
-     r"overrides\['urban'\]\['populated_areas'\] names \['target_ha'\], which "
+    ({"urban": {"populated_areas": {"target_acres": 5}}},
+     r"overrides\['urban'\]\['populated_areas'\] names \['target_acres'\], which "
      r"populated_areas does not take here; it accepts \['pixel_m', "),
     ({"urban": {"populated_areas": {"resource_type": "DOG"}}},
      r"\['populated_areas'\] names \['resource_type'\], which populated_areas does not take"),
@@ -924,7 +926,7 @@ def test_a_unit_beside_radius_m_is_refused_before_any_work(ctx, monkeypatch, arg
     ({"urban": {"populated_areas": {"building_markers": True}}},
      "cannot set 'building_markers': plan_urban_search sets it from its own argument "
      "building_markers"),
-    ({"urban": {"urban_assignments": {"target_ha": 5}}}, "own argument target_ha"),
+    ({"urban": {"urban_assignments": {"target_acres": 5}}}, "own argument target_acres"),
     ({"urban": {"urban_assignments": {"resource_type": "DOG"}}}, "own argument resource_type"),
     ({"urban": {"urban_assignments": {"building_markers": True}}},
      "own argument building_markers"),
@@ -992,11 +994,11 @@ def test_a_marker_colour_is_refused_only_when_markers_are_drawn(ctx, monkeypatch
     ({"radius_m": 4200.0}, r"radius of 4,200.0 m is too wide to read lot lines over, so "
                            r"nothing was staged: populated_areas would refuse it - the staged "
                            r"area is 8.8 km across.*or leave urban out of include"),
-    ({"target_ha": 0}, "target_ha must be a number of hectares above zero"),
-    ({"target_ha": -5.0}, "target_ha"),
-    ({"target_ha": float("nan")}, "target_ha"),
-    ({"target_ha": True}, "target_ha"),
-    ({"target_ha": "10"}, "target_ha"),
+    ({"target_acres": 0}, "target_acres must be a number of acres above zero"),
+    ({"target_acres": -5.0}, "target_acres"),
+    ({"target_acres": float("nan")}, "target_acres"),
+    ({"target_acres": True}, "target_acres"),
+    ({"target_acres": "10"}, "target_acres"),
     ({"resource_type": ""}, "resource_type must be a resource type"),
     ({"resource_type": 5}, "resource_type"),
     ({"building_markers": "false"}, "building_markers must be true or false"),
@@ -1171,7 +1173,7 @@ class TownStaging(FakeStaging):
         from test_populated import elm_street
 
         from sar_geo_mcp.planning.area import build_area
-        from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+        from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
         payload = super().__call__(ctx, **arguments)
         area = build_area(center_latitude=arguments["center_latitude"],
@@ -1207,7 +1209,7 @@ def test_the_urban_section_reads_what_the_real_features_return(tmp_path, monkeyp
 
         monkeypatch.setattr(urban_feature, name, keep)
 
-    result = plan_urban_search(ctx, *CENTRE, radius_m=170, target_ha=2.0,
+    result = plan_urban_search(ctx, *CENTRE, radius_m=170, target_acres=2.0 / HA_PER_ACRE,
                                building_markers=True, include=["urban", "export"])
 
     assert result["status"] == "ok", {name: entry["error"]
@@ -1216,15 +1218,15 @@ def test_the_urban_section_reads_what_the_real_features_return(tmp_path, monkeyp
     grouped = real["urban_assignments"]
     (assignment,) = grouped["candidates"]
     assert set(_sections.URBAN_FACTS) <= set(assignment["facts"])
-    assert {"target_ha", "target_source"} <= set(grouped["assumptions"]["grouping"])
-    assert {"count", "area_ha", "parcels", "buildings", "parcels_left_out", "markers"} <= set(
+    assert {"target_acres", "target_source"} <= set(grouped["assumptions"]["grouping"])
+    assert {"count", "area_acres", "parcels", "buildings", "parcels_left_out", "markers"} <= set(
         grouped["summary"])
     assert set(_sections.BLOCK_COUNTS) <= set(real["populated_areas"]["summary"])
     (compact,) = urban["assignments"]
     assert compact["name"] == "Elm Street" and compact["streets"] == ["Elm Street"]
     assert (compact["blocks"], compact["parcels"], compact["buildings"]) == (2, 13, 16)
     assert compact["markers"] == 16 and urban["markers"] == 16
-    assert urban["target_ha"] == 2.0 and urban["target_source"] == "given"
+    assert urban["target_acres"] == 4.9 and urban["target_source"] == "given"    # 2 ha
     # The blocks the assignments group are the ones counted.
     assert urban["blocks"]["count"] == compact["blocks"] == 2
     assert urban["blocks"]["parcels_in_blocks"] == urban["parcels"] == 13
@@ -1256,7 +1258,7 @@ def test_a_wider_max_distance_reads_no_block_beyond_the_search_circle(tmp_path, 
 
     def urban(name, radius_m, overrides=None):
         ctx = ServerContext.build(CaltopoConfig(cache_dir=tmp_path / name, wms_token=TOKEN))
-        result = plan_urban_search(ctx, *CENTRE, radius_m=radius_m, target_ha=0.5,
+        result = plan_urban_search(ctx, *CENTRE, radius_m=radius_m, target_acres=0.5 / HA_PER_ACRE,
                                    include=["urban"], overrides=overrides)
         assert result["status"] == "ok", result["sections"]["urban"]["error"]
         return result["sections"]["urban"]
@@ -1287,7 +1289,7 @@ def test_the_drafts_take_urban_assignments_marker_colour(tmp_path, monkeypatch):
     monkeypatch.setattr(staging_component, "prepare_area", TownStaging())
     monkeypatch.setattr(wms, "fetch_panel", fake_fetch(*town()))
     result = plan_urban_search(
-        ctx, *CENTRE, radius_m=170, target_ha=2.0, building_markers=True,
+        ctx, *CENTRE, radius_m=170, target_acres=2.0 / HA_PER_ACRE, building_markers=True,
         include=["urban", "export"],
         overrides={"urban": {"urban_assignments": {"marker_color": "ff0000"}}})
     assert result["status"] == "ok"
@@ -1315,10 +1317,10 @@ def test_ground_with_no_populated_block_is_an_empty_answer_not_a_failure(tmp_pat
 
     assert result["status"] == "ok"
     urban = result["sections"]["urban"]
-    assert urban["assignments"] == [] and urban["count"] == 0 and urban["area_ha"] is None
+    assert urban["assignments"] == [] and urban["count"] == 0 and urban["area_acres"] is None
     assert NO_PARCELS_WARNING in urban["warnings"]
     assert urban["blocks"]["count"] == 0
-    assert result["summary"]["urban"] == {"count": 0, "target_ha": 10.0, "area_ha": None,
+    assert result["summary"]["urban"] == {"count": 0, "target_acres": 24.7, "area_acres": None,
                                           "parcels": 0, "buildings": 0}
     export = result["sections"]["export"]
     assert export["assignments"] == 0 and export["features"] == {"Shape": 1, "Marker": 1}
@@ -1393,18 +1395,20 @@ def test_an_unknown_resource_type_is_sized_by_the_median_of_every_assignment(tmp
 
     typo = urban("typo", "DOGS")
     section = typo["sections"]["urban"]
-    assert section["target_ha"] == norms["polygon_area_ha"]["p50"] == 9.1
-    assert typo["summary"]["urban"]["target_ha"] == 9.1
+    # The corpus's 9.1 ha, in acres.
+    assert norms["polygon_area_ha"]["p50"] == 9.1 and section["target_acres"] == 22.5
+    assert typo["summary"]["urban"]["target_acres"] == 22.5
     assert section["detail_call"]["arguments"]["resource_type"] == "DOGS"
 
     lower = urban("lower", "dog")["sections"]["urban"]
-    assert (lower["target_ha"], lower["target_source"]) == (
-        norms["area_ha_by_resource"]["medians"]["DOG"], "corpus median for DOG")
+    assert (lower["target_acres"], lower["target_source"]) == (
+        round(norms["area_ha_by_resource"]["medians"]["DOG"] / HA_PER_ACRE, 1),
+        "corpus median for DOG")
 
 
 def test_an_unknown_resource_type_says_it_fell_back_to_the_overall_median(tmp_path,
                                                                           monkeypatch):
-    """DOGS for DOG sizes the assignments ~70% larger (9.1 ha, not 5.4). The
+    """DOGS for DOG sizes the assignments ~70% larger (22.5 acres, not 13.3). The
     answer must not report a median for DOGS that the corpus does not have,
     and must say the type is unknown, so the typo can be seen."""
     from test_populated import CENTRE
@@ -1413,14 +1417,16 @@ def test_an_unknown_resource_type_says_it_fell_back_to_the_overall_median(tmp_pa
     result = plan_urban_search(town_ctx(tmp_path / "cache"), *CENTRE, radius_m=170,
                                resource_type="DOGS", include=["urban", "export"])
     section = result["sections"]["urban"]
-    assert section["status"] == "ok" and section["target_ha"] == 9.1
+    assert section["status"] == "ok" and section["target_acres"] == 22.5
     assert section["target_source"] != "corpus median for DOGS"
     assert any("DOGS" in warning for warning in [*section["warnings"], *result["warnings"]])
 
 
 #: An agency's GROUND median under the synthetic town's 1.55 ha of blocks,
 #: so it splits Elm Street in two where the shipped 10 ha keeps it whole.
+#: The file is written in hectares; answers give it in acres.
 AGENCY_GROUND_HA = 1.0
+AGENCY_GROUND_ACRES = round(AGENCY_GROUND_HA / HA_PER_ACRE, 1)
 
 
 def agency_ground(norms: dict) -> None:
@@ -1437,20 +1443,20 @@ def test_an_agency_norms_file_sizes_the_urban_assignments(tmp_path, monkeypatch)
     over_the_town(monkeypatch)
     path = agency_norms(tmp_path / "agency.json", agency_ground)
     ctx = town_ctx(tmp_path / "agency", norms_path=path)
-    assert norms_component.assignment_norms(ctx, "GROUND")["target_area_ha"]["p50"] == (
-        AGENCY_GROUND_HA)
+    assert norms_component.assignment_norms(ctx, "GROUND")["target_area_acres"]["p50"] == (
+        AGENCY_GROUND_ACRES)
 
     result = plan_urban_search(ctx, *CENTRE, radius_m=170, include=["urban"])
     urban = result["sections"]["urban"]
     assert urban["status"] == "ok", urban["error"]
-    assert (urban["target_ha"], urban["target_source"]) == (AGENCY_GROUND_HA,
+    assert (urban["target_acres"], urban["target_source"]) == (AGENCY_GROUND_ACRES,
                                                             "corpus median for GROUND")
-    assert result["summary"]["urban"]["target_ha"] == AGENCY_GROUND_HA
+    assert result["summary"]["urban"]["target_acres"] == AGENCY_GROUND_ACRES
     assert [a["name"] for a in urban["assignments"]] == ["Elm Street", "Elm Street"]
 
     shipped = plan_urban_search(town_ctx(tmp_path / "shipped"), *CENTRE, radius_m=170,
                                 include=["urban"])["sections"]["urban"]
-    assert (shipped["target_ha"], shipped["target_source"]) == (10.0,
+    assert (shipped["target_acres"], shipped["target_source"]) == (24.7,
                                                                 "corpus median for GROUND")
     assert [a["name"] for a in shipped["assignments"]] == ["Elm Street"]
 
@@ -1516,16 +1522,16 @@ def test_assignments_grouped_under_the_shipped_norms_are_not_reused_under_an_age
         return section
 
     def grouped(section):
-        return (section["target_ha"], section["count"],
+        return (section["target_acres"], section["count"],
                 [a["name"] for a in section["assignments"]])
 
     first = urban(town_ctx(cache))
-    assert first["target_ha"] == 10.0 and first["reused"] is False
+    assert first["target_acres"] == 24.7 and first["reused"] is False
     again = urban(town_ctx(cache, norms_path=path))
     fresh = urban(town_ctx(tmp_path / "fresh", norms_path=path))
     # The same ground, not staged again: its blocks are read back.
     assert again["handle"] == first["handle"] and again["blocks"]["reused"] is True
-    assert grouped(fresh) == (AGENCY_GROUND_HA, 2, ["Elm Street", "Elm Street"])
+    assert grouped(fresh) == (AGENCY_GROUND_ACRES, 2, ["Elm Street", "Elm Street"])
     assert again["reused"] is False
     assert grouped(again) == grouped(fresh)
 

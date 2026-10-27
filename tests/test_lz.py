@@ -51,7 +51,7 @@ from sar_geo_mcp.planning.lz import (
     rectangle_fits_at,
     rectangle_footprint,
 )
-from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
 TO4326 = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True).transform
 ORIGIN = (-13618826.5, 4486605.0)

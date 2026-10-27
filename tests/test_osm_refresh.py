@@ -23,7 +23,7 @@ from sar_geo_mcp.staging import (
     write_manifest,
 )
 from sar_geo_mcp.terrain import linear
-from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION, OverpassUnavailable
+from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION, OverpassUnavailable
 
 BBOX = (0.0, 0.0, 100.0, 100.0)
 

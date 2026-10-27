@@ -132,7 +132,7 @@ def register(mcp, ctx) -> None:
 
         Returns summaries WITHOUT geometry - ids, kind, axis, name, facts
         (`length_m`, `branches` and `clipped_at_edge` for a line, `width_m`
-        and `area_ha` for a
+        and `area_acres` for a
         corridor, distance and bearing from the centre, nearest point, slope,
         gain and loss, ingress junctions and area crossings, effort,
         `sources`, `axis_ids`,

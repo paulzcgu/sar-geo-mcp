@@ -10,6 +10,7 @@ import numpy as np
 from rasterio.transform import from_origin
 from test_grid import make_wgs84_square, write_fetch_dir
 
+from sar_geo_mcp.sources import osm as osm_source
 from sar_geo_mcp.staging import stage_terrain, write_manifest
 from sar_geo_mcp.terrain.grid import load_assignment_grid
 
@@ -80,7 +81,7 @@ def test_stage_terrain_writes_subject_json_for_an_area_and_no_assignment_json(tm
 def test_staged_osm_json_records_the_query_version_it_was_fetched_with(tmp_path, monkeypatch):
     """A directory staged by an older query is missing barriers, water edges
     and some road types; the version is what lets a reader notice."""
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
     stub_fetchers(monkeypatch, tmp_path)
     out = tmp_path / "staged"
@@ -106,7 +107,7 @@ def test_staged_osm_json_carries_parking_beside_the_routes(monkeypatch, tmp_path
                   fingerprint="abc", access="public", subject_kind="area")
     payload = json.loads((out / "osm.json").read_text(encoding="utf-8"))
 
-    assert payload["query_version"] == linear.OSM_QUERY_VERSION
+    assert payload["query_version"] == osm_source.OSM_QUERY_VERSION
     assert [site["id"] for site in payload["parking"]] == ["parking-w10"]
     assert [route["id"] for route in payload["routes"]] == ["route_0"]
 
@@ -124,7 +125,7 @@ def test_a_first_staging_writes_gates_into_osm_json(monkeypatch, tmp_path):
                   fingerprint="abc", access="public", subject_kind="area")
     payload = json.loads((out / "osm.json").read_text(encoding="utf-8"))
 
-    assert payload["query_version"] == linear.OSM_QUERY_VERSION == 5
+    assert payload["query_version"] == osm_source.OSM_QUERY_VERSION == 5
     assert payload["gates"] == [{"id": "gate-n1"}]
 
 
@@ -178,7 +179,7 @@ def test_an_unreachable_overpass_warns_with_its_reason_not_just_a_class_name(
         tmp_path, monkeypatch):
     """`osm unavailable: HTTPStatusError` tells an operator nothing. The
     warning now carries the sentence the exception was written to say."""
-    from sar_geo_mcp.terrain.linear import OverpassUnavailable
+    from sar_geo_mcp.sources.osm import OverpassUnavailable
 
     stub_fetchers(monkeypatch, tmp_path)
 
@@ -294,7 +295,7 @@ def _stub_ridge_dem(monkeypatch, tmp_path):
 
 
 def _overpass_down(monkeypatch):
-    from sar_geo_mcp.terrain.linear import OverpassUnavailable
+    from sar_geo_mcp.sources.osm import OverpassUnavailable
 
     def refuse(bbox, cache_dir):
         raise OverpassUnavailable("every Overpass endpoint refused", status=429)
@@ -332,7 +333,7 @@ def test_an_outage_with_no_previous_manifest_drops_a_stray_osm_json(tmp_path, mo
     """No manifest, no way to say what ground the file was fetched for - so
     it cannot be said to belong to this staging."""
     from sar_geo_mcp.staging import is_osm_outage_warning
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
     stub_fetchers(monkeypatch, tmp_path)
     _overpass_down(monkeypatch)
@@ -354,7 +355,7 @@ def test_an_outage_with_no_previous_manifest_drops_a_stray_osm_json(tmp_path, mo
 def test_the_same_ground_restaged_in_an_outage_keeps_its_osm_json_and_says_so(
         tmp_path, monkeypatch):
     from sar_geo_mcp.staging import is_osm_outage_warning, manifest_warnings
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
     stub_fetchers(monkeypatch, tmp_path)
     monkeypatch.setattr("sar_geo_mcp.terrain.linear.routes_for",
@@ -473,7 +474,7 @@ def test_other_grounds_osm_json_that_cannot_be_removed_fails_without_a_path(
 # --- a gates-only failure is an OSM failure like any other (query version 5) ------
 
 def _gates_down(monkeypatch):
-    from sar_geo_mcp.terrain.linear import OverpassUnavailable
+    from sar_geo_mcp.sources.osm import OverpassUnavailable
 
     def refuse(bbox, cache_dir):
         raise OverpassUnavailable("every Overpass endpoint refused", status=429)

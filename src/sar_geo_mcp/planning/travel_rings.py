@@ -49,7 +49,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..geo import to_wgs84_geojson
+from ..geo import acres, to_wgs84_geojson
 from ..terrain.grid import load_assignment_grid
 from ..terrain.movement import DEFAULT, TOBLER_MAX_KMH
 from .area import MAX_EXTENT_M, PLANNING_AREA_BUFFER_M
@@ -299,7 +299,7 @@ def _ring(minutes_surface: np.ndarray, limit: float, grid, *, distance_m: np.nda
         "geometry": to_wgs84_geojson(geometry),
         "outline": to_wgs84_geojson(LineString(largest.exterior.coords)),
         "parts": 1 if geometry.geom_type == "Polygon" else len(geometry.geoms),
-        "area_ha": round(area_m2 / 10_000.0, 1),
+        "area_acres": round(acres(area_m2), 1),
         "equivalent_radius_m": round(math.sqrt(area_m2 / math.pi), 0),
         "max_reach_m": round(float(distance_m.flat[far]), 0),
         "max_reach_bearing_deg": round(float(bearing_deg.flat[far]), 0),

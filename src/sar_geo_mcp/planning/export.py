@@ -103,8 +103,8 @@ def _describe(candidate: dict, set_id: str | None) -> str:
                       ("markers", "house marker(s)")):
         if facts.get(key) is not None:
             numbers.append(f"{facts[key]} {word}")
-    if facts.get("area_ha") is not None:
-        numbers.append(f"{facts['area_ha']} ha")
+    if facts.get("area_acres") is not None:
+        numbers.append(f"{facts['area_acres']:g} acres")
     if facts.get("length_m") is not None:
         numbers.append(f"{facts['length_m']:.0f} m long")
     if numbers:

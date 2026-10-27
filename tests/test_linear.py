@@ -3,20 +3,8 @@ import json
 import pytest
 from shapely.geometry import box
 
-from sar_geo_mcp.terrain.linear import (
-    LINEAR_ASSUMPTIONS,
-    OSM_TILE_M,
-    build_overpass_query,
-    classify_site,
-    classify_way,
-    gates_for,
-    ingress_candidates,
-    is_site_shaped,
-    parking_for,
-    routes_for,
-    site_flags,
-    tiles_covering_osm,
-)
+from sar_geo_mcp.terrain.linear import LINEAR_ASSUMPTIONS, classify_site, classify_way, gates_for, ingress_candidates, is_site_shaped, parking_for, routes_for, site_flags
+from sar_geo_mcp.sources.osm import OSM_TILE_M, build_overpass_query, tiles_covering_osm
 
 # A small AOI in public parkland.
 BBOX = (-13606608.2, 4490700.1, -13605941.3, 4491434.5)
@@ -502,7 +490,7 @@ def test_the_query_asks_for_parking_and_public_hardstand():
 
 
 def test_the_query_version_moved_so_old_tiles_are_not_read_as_complete():
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
     # A version 4 tile holds no gates and its routes carry no road class,
     # access or tracktype. Read as if it did, it says "no gate on this
@@ -512,12 +500,12 @@ def test_the_query_version_moved_so_old_tiles_are_not_read_as_complete():
 
 
 def test_tile_files_carry_the_query_version_so_old_caches_refetch(tmp_path):
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION, fetch_osm_tile
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION, fetch_osm_tile
 
     calls = []
     payload = fetch_osm_tile(-3403, 1122, tmp_path, get_json=lambda q: calls.append(q) or {"elements": []})
     assert payload == {"elements": []}
-    assert (tmp_path / f"osm_tile_v{OSM_QUERY_VERSION}_c-3403_r1122.json").is_file()
+    assert (tmp_path / "osm" / f"osm_tile_v{OSM_QUERY_VERSION}_c-3403_r1122.json").is_file()
     # A v1 file on disk is not read.
     (tmp_path / "osm_tile_c-3403_r1122.json").write_text('{"elements": [1]}', encoding="utf-8")
     fetch_osm_tile(-3403, 1122, tmp_path, get_json=lambda q: calls.append(q) or {"elements": []})
@@ -806,7 +794,7 @@ def test_parking_for_keeps_the_complete_copy_when_the_first_tile_is_broken(tmp_p
     complete copy could arrive first and this test would pass without
     exercising the `seen.add` placement it exists to pin."""
 
-    from sar_geo_mcp.terrain.linear import _tile_bounds_wgs84
+    from sar_geo_mcp.sources.osm import _tile_bounds_wgs84
 
     closed_ring = [
         {"lat": 0.0001, "lon": 0.0100}, {"lat": 0.0001, "lon": 0.0200},
@@ -1004,16 +992,8 @@ def test_ingress_counts_only_walkable_classes():
 
 import httpx
 
-from sar_geo_mcp.terrain import linear as linear_module
-from sar_geo_mcp.terrain.linear import (
-    OVERPASS_ATTEMPTS_PER_ENDPOINT,
-    OVERPASS_BUDGET_S,
-    OVERPASS_URL,
-    OVERPASS_URLS,
-    OverpassUnavailable,
-    _http_post,
-    overpass_endpoints,
-)
+from sar_geo_mcp.sources import osm as osm_source
+from sar_geo_mcp.sources.osm import OVERPASS_ATTEMPTS_PER_ENDPOINT, OVERPASS_BUDGET_S, OVERPASS_URL, OVERPASS_URLS, OverpassUnavailable, _http_post, overpass_endpoints
 
 OK_PAYLOAD = {"elements": [{"type": "way", "id": 7, "tags": {"highway": "path"},
                             "geometry": [{"lat": 37.37, "lon": -122.23},
@@ -1292,8 +1272,7 @@ def test_a_429_on_the_first_mirror_is_retried_not_abandoned():
 
 
 def test_the_query_asks_for_distribution_lines_and_says_so_in_its_version():
-    from sar_geo_mcp.terrain.linear import (OSM_QUERY_VERSION, OSM_QUERY_VERSION_MINOR_LINES,
-                                            build_overpass_query)
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION, OSM_QUERY_VERSION_MINOR_LINES, build_overpass_query
 
     # Distribution lines arrived at 4; the query has moved on since (5, for
     # road tags and gates) and still asks for them.
@@ -1312,7 +1291,7 @@ def test_a_distribution_line_is_a_barrier_with_its_power_tag(tmp_path):
 
 
 def test_a_successful_fetch_still_writes_the_cache_tile(tmp_path):
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION, fetch_osm_tile
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION, fetch_osm_tile
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=OK_PAYLOAD)
@@ -1324,7 +1303,7 @@ def test_a_successful_fetch_still_writes_the_cache_tile(tmp_path):
 
     payload = fetch_osm_tile(-3403, 1122, tmp_path, get_json=get_json)
 
-    destination = tmp_path / f"osm_tile_v{OSM_QUERY_VERSION}_c-3403_r1122.json"
+    destination = tmp_path / "osm" / f"osm_tile_v{OSM_QUERY_VERSION}_c-3403_r1122.json"
     assert payload == OK_PAYLOAD
     assert json.loads(destination.read_text(encoding="utf-8")) == OK_PAYLOAD
     assert not list(tmp_path.glob("*.part"))
@@ -1364,7 +1343,7 @@ def test_an_endpoint_configured_with_credentials_never_names_them(monkeypatch):
     ("https://[2001:db8::1]/api/interpreter", "[2001:db8::1]"),
 ])
 def test_an_endpoint_is_named_by_its_host_and_port_only(url, expected):
-    assert linear_module._host(url) == expected
+    assert osm_source._host(url) == expected
 
 
 @pytest.mark.parametrize("url", [
@@ -1381,8 +1360,8 @@ def test_an_endpoint_whose_userinfo_cannot_be_told_from_its_host_names_nothing(u
     """A '/', '?' or '#' in an unencoded password ends the authority early,
     so a parser reads part of the userinfo as the host. Rather than guess,
     name no host."""
-    host = linear_module._host(url)
-    assert host == linear_module.UNREADABLE_ENDPOINT
+    host = osm_source._host(url)
+    assert host == osm_source.UNREADABLE_ENDPOINT
     for secret in ("planner", "hun", "ter2", "hunter2", "notaport", "admin", "1234",
                    "rest", "user", "12", "pw", "token", "TOKEN"):
         assert secret.lower() not in host.lower()
@@ -1393,7 +1372,7 @@ SECRET_ENDPOINTS = ("https://planner:hunter2@osm.agency.example/api/interpreter,
 
 
 def test_the_reported_endpoints_are_hosts(monkeypatch):
-    from sar_geo_mcp.terrain.linear import reported_endpoints
+    from sar_geo_mcp.sources.osm import reported_endpoints
 
     monkeypatch.setenv("ZA_OVERPASS_URLS", SECRET_ENDPOINTS)
     assert reported_endpoints() == ["osm.agency.example", "mirror.example"]
@@ -1439,7 +1418,7 @@ def _bbox_around(lat: float, lon: float, half_m: float = 500.0):
 
 
 def test_version_5_is_the_road_tags_and_gates_version():
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION, OSM_QUERY_VERSION_ROUTE_TAGS
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION, OSM_QUERY_VERSION_ROUTE_TAGS
     assert OSM_QUERY_VERSION == 5 and OSM_QUERY_VERSION_ROUTE_TAGS == 5
 
 

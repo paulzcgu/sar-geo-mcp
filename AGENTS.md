@@ -239,7 +239,8 @@ component   parse_coordinate, get_candidate, cache_status     ┘
 ─────────────────────────────────────────────────────────────────
 domain      terrain/, coverage/, planning/ algorithms,          ┐ internal
             staging, prefetch, handles, coords                   │ libraries
-infra       net, net_errors, config, cache/, tiles, geo,         │
+infra       sources/ (every external data source), net,          │
+            net_errors, config, cache/, tiles, geo,              │
             CalTopo session and WMS transport                    ┘
 ```
 
@@ -262,8 +263,51 @@ debrief. Lives in `src/sar_geo_mcp/scenarios/`.
 **Domain** - the SAR logic itself: what a ridge is, how an LZ is graded,
 how fast a walker moves through brush. Independently tested.
 
-**Infra** - plumbing with no SAR knowledge: HTTP and retries, the disk
-cache, tile arithmetic, CalTopo login and WMS transport.
+**Infra** - plumbing with no SAR knowledge: the data sources (`sources/`),
+HTTP and retries, the disk cache, tile arithmetic, CalTopo login and WMS
+transport.
+
+## Data sources (`sources/`)
+
+Every external service this package reads is a class in `sources/`, one
+module each, built on `sources.base`: 3DEP elevation, LANDFIRE vegetation,
+CalTopo map layers, USGS NAIP, Mapbox and Google satellite, OpenStreetMap,
+the land agency inventories, HIFLD hospitals, OSRM and TIGERweb. A source
+fetches, caches and returns the service's own data in the service's own
+terms; what it means for a search (a walkable way, a trauma level, a bare
+corridor) is domain logic that reads it.
+
+- **Three kinds**, by the shape of what comes back: `RasterSource.fetch(area,
+  width_px, height_px)` (a georeferenced image), `FeatureSource.query(area,
+  filters, limit)` (GeoJSON features), `ServiceSource.call(**params)` (JSON).
+  Each class carries a `SourceInfo`: name, provider, endpoint and its
+  environment override, key variable, attribution, coverage, and whether
+  Claude may pull it directly (`pullable`; Google's terms keep it to
+  landing-zone chips).
+- **Adding a source** is one module: subclass the kind, fill in `info`, write
+  the one method, add the module to `sources.MODULES`, and give
+  `tests/test_source_contract.py` a `FAKE_CALLS` entry that runs it against a
+  fake transport. The contract test then checks it like every other source:
+  its info is complete, its endpoint overrides, its key never appears in what
+  it says or in a failure (`SourceUnavailable` carries type and status only),
+  and its answer has its kind's shape. A failure is `SourceUnavailable`, never
+  an empty answer.
+- **Its own cache folder**: `<cache>/<source name>/` (`cache.layout`), file
+  names unchanged inside it, one index at the root. A source whose files
+  predate 0.43.0 lists their old paths (`LEGACY_CACHE`); its first fetch in a
+  process moves them in and rewrites their index keys - never a download.
+  `tests/test_source_pins.py` pins every cache name and the Overpass query
+  text, so a change to either is deliberate.
+- **Only infra sends a request.** `tests/test_network_access.py` fails when a
+  module outside infra calls httpx to send one; catching httpx's errors is
+  fine. And no test reaches the network: `tests/conftest.py` fails any test
+  not marked `live` that opens a connection, even one the code swallowed.
+- **Claude pulls a source directly** through three components:
+  `list_data_sources`, `fetch_raster` and `query_features`
+  (`components/sources.py`). They take a staged handle or a centre and
+  radius (at most 4,500 m), save the data as a file under the source's
+  folder, return a summary rather than pixels, and say every time that raw
+  data carries none of the planning tools' checks.
 
 ## Rules
 
@@ -371,6 +415,7 @@ infra never import it, and nothing imports `server`, `context` included
 | component | `components/candidates.py` | `get_candidate`, `caltopo_export` |
 | component | `components/files.py` | `save_export` |
 | component | `components/setup.py` | `key_status`, `check_for_update` |
+| component | `components/sources.py` | `list_data_sources`, `fetch_raster`, `query_features` |
 | feature | `features/relief.py` | `shaded_relief`, `slope_shading` |
 | feature | `features/unmarked_paths.py` | `unmarked_paths` |
 | feature | `features/boundary.py` | `describe_boundary` |
@@ -431,8 +476,8 @@ and a wrapper that only calls it.
   tool would refuse (`rings_ground`, through the feature's own
   `rings_model`), an export `label_prefix` `caltopo_export` would
   refuse or a blank export `resource_type` (`check_export_overrides`), a
-  `target_ha` not above zero
-  (`check_target_ha`), a block rule or marker colour (null included) the
+  `target_acres` not above zero
+  (`check_target_acres`), a block rule or marker colour (null included) the
   urban tools would refuse (`check_urban_overrides`, through
   `planning.populated.check_params`) and a search circle too wide to read
   lot lines over (`check_urban_radius`, through the feature's own
@@ -942,7 +987,13 @@ across - lot lines are read at 1 m) and it returns one block per street:
   so no house is in two. A lot belongs to the named OpenStreetMap street it
   has the most edge along, so a corner lot can land on the street its address
   is not on. A street whose lots fall into separate runs gives one block per
-  run, numbered; a run under `min_parcels` (3) houses joins the block whose
+  run, numbered, and every cross street ends a run: it is cut along each
+  other named street's OpenStreetMap centreline (a lot is never cut, but
+  goes whole to the piece holding most of it), so a block is a street both
+  sides from cross street to cross street. A run the circle keeps is
+  finished out to its cross streets - a corner lot or a row facing the
+  cross street, filed under a block the circle does not reach, joins the
+  run it touches; a run under `min_parcels` (3) houses joins the block whose
   lots it touches, and only one touching none is left out, counted in the
   summary. A vacant lot touching its street's houses is searched with them.
 - **A big lot that is mostly roof is its own block** (`axis`
@@ -969,9 +1020,9 @@ A first cut, not a census: an undrawn house reads as a vacant lot and an
 undrawn lot line as one lot. The planner adjusts the blocks and decides
 which to search first.
 
-`urban_assignments(handle, target_ha)` turns those blocks into assignments
-of about one size - 10 ha by default, the corpus median for a ground team
-(`resource_type`), or the `target_ha` you give. A type the corpus has no
+`urban_assignments(handle, target_acres)` turns those blocks into
+assignments of about one size - 25 acres by default, the corpus median for a
+ground team (`resource_type`), or the `target_acres` you give. A type the corpus has no
 median for - DOGS for DOG - is sized by the median of every assignment, and
 `target_source` and a warning say so rather than name a median it lacks.
 Each block is one street, both sides, back fence to back fence, and blocks
@@ -979,18 +1030,34 @@ merge smallest first along the streets that join them - a cul-de-sac into
 the road it opens onto - into the most compact shape, until a group reaches
 60 % of the target and never past 140 %, so a team always has both sides of
 its streets; blocks that only back onto each other merge only when a group
-is left under 30 % of the target. Hand-drawn door-to-door assignments run 1
-to 4 ha: pass `target_ha` (about 2.5) for teams that size. A group never
+is left under 30 % of the target. Hand-drawn door-to-door assignments run 2.5
+to 10 acres: pass `target_acres` (about 6) for teams that size. A group never
 crosses an arterial (an OpenStreetMap motorway, trunk, primary or secondary
 road), so the boulevards are the edges; small groups left over pair across
 water, two at most - two isles a team drives between - drawn as one polygon
 by a thin strip. Sizes follow the streets, so they spread round the target:
 in a bayside suburb (0.33.0, before street-joined merging), half a mile
-round a residential street at 11.7 ha, 65 blocks became
-14 assignments of 3.9 to 16.2 ha, median 11.0, and the smallest is a pocket
+round a residential street at 29 acres, 65 blocks became
+14 assignments of 9.6 to 40 acres, median 27, and the smallest is a pocket
 boxed in by two boulevards. Pass `max_distance_m` (the radius) to keep the
 blocks of the search circle: every block the circle reaches is kept whole,
-out to the back fences beyond the nearest street.
+out to the back fences beyond the nearest street - and out to the end of
+its street: lot lines are read 200 m past the area, and again twice as far
+while a kept block runs into the edge of what was read, up to the 1,000 m
+planning buffer (`assumptions.margin_m`). Edges snap to the streets, as on
+a hand-drawn CalTopo plan (`snap_outlines`): OpenStreetMap centrelines are
+barriers no ground is given across, so two assignments either side of a
+street meet on its centreline; an edge facing a street within 30 m is drawn
+out to it, straight ahead of the edge (no finger runs along the street past
+the run), as is a notch opening onto one; a pocket or slit most of whose
+surroundings the assignments already cover goes to the nearest one in
+sight, and so does the rest of a city block they mostly cover; centrelines
+are run on 15 m past their ends, closing the gap OpenStreetMap leaves at a
+T junction; a boulevard's median goes with the ground beside it; and ground between two assignments up to 90 m apart
+(`snap_gap_m`) with no street through it - a fence-line strip - is split
+down its middle. No gap, no overlap, and every edge simplified as one
+coverage, so a shared edge is one line. An outer back fence facing no other
+assignment stays where it is. `area_acres` includes the street ground taken.
 
 `caltopo_export(handle, set_id)` writes any candidate set - urban
 assignments, populated blocks, hasty lines - as a GeoJSON file CalTopo
@@ -1102,6 +1169,11 @@ are unknown. A failed road or helipad lookup is a warning; a failed hospital
 lookup is an error.
 
 `assignment_norms(resource_type)` gives the defaults and their provenance.
+**Areas are in acres**, everywhere a tool answers (`area_acres`,
+`target_acres`, `target_area_acres`, an `area_acres` norm flag): the unit a
+search planner works in. The corpus file keeps its hectares
+(`polygon_area_ha`, `area_ha_by_resource`), as another agency's file is
+written, and is converted on the way out (`geo.acres`, `norms_in_acres`).
 What the agent must not delegate: the radius and region, the resource and
 team hours, the wording, the priority, any likelihood reasoning - the server
 has no opinion on any of these and returns none. Summaries carry ids, not

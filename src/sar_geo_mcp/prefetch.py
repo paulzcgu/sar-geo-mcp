@@ -396,10 +396,12 @@ def _estimate_key(layer: str) -> str:
 
 
 def _tile_path(cache_dir: Path, layer: str, tile: Tile) -> Path:
+    from .caltopo.wms import panel_tile_path
+    from .sources.dem import tile_path
+
     if layer == "dem":
-        return cache_dir / tile.key("dem", "tif")
-    layers = layer.split(":", 1)[1]
-    return cache_dir / tile.key(f"wms-{layers}", "png")
+        return tile_path(cache_dir, tile)
+    return panel_tile_path(cache_dir, layer.split(":", 1)[1].split("-"), tile)
 
 
 # --- doing it --------------------------------------------------------------
@@ -427,7 +429,7 @@ def run_prefetch(
     returned in the result.
     """
     from .caltopo.wms import fetch_panel_tile
-    from .terrain.dem import fetch_dem_tile
+    from .sources.dem import fetch_dem_tile
 
     cache_dir = Path(cache_dir)
     plan = plan_prefetch(map_id, features, cache_dir, panel_sets, include_terrain)

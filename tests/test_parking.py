@@ -9,7 +9,7 @@ import math
 import pytest
 
 from sar_geo_mcp.planning.parking import NEAREST_WAY_CEILING_M, parking_candidates
-from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
 # Windy Hill, the area the day-one work was measured on.
 CENTRE = (37.35687, -122.24093)

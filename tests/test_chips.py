@@ -6,7 +6,7 @@ import math
 import httpx
 import pytest
 
-from sar_geo_mcp.planning.chips import (
+from sar_geo_mcp.sources.static_imagery import (
     GOOGLE_TILE_PX, MAPBOX_TILE_PX, get_static, google_request, mapbox_request,
 )
 

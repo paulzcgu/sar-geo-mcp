@@ -352,7 +352,7 @@ def register(mcp, ctx) -> None:
         corridor), `axis` (trail, road or waterway), `name`
         (null when unnamed), `length_m`; a line's `branches` (pieces; more
         than 1 is not one walk end to end) and `clipped_at_edge` (the way runs
-        on past the staged ground); a corridor's `width_m` and `area_ha`;
+        on past the staged ground); a corridor's `width_m` and `area_acres`;
         `distance_from_center_m` and `bearing_from_center_deg` (null when it
         passes through the place last seen); `travel_minutes_from_center`, the
         walking minutes to it on the rings' default walking model - null when
@@ -400,7 +400,7 @@ def register(mcp, ctx) -> None:
         `ring_minutes` (default 15, 30 and 60; at most 8): the ground a walker
         reaches within that many WALKING minutes, stretched along trails,
         pinched by cliffs and unbridged rivers, slowed by brush and creek
-        crossings. Each ring has `minutes`, `parts`, `area_ha`,
+        crossings. Each ring has `minutes`, `parts`, `area_acres`,
         `equivalent_radius_m` (the circle of the same area), `max_reach_m`
         and `max_reach_bearing_deg`, `farthest_point`, `reach_by_direction_m`
         (the farthest reachable ground in each of the eight directions N to
@@ -504,7 +504,7 @@ def register(mcp, ctx) -> None:
         kind, name, distance and bearing, flags). `nearest` is null when
         there is no site. `count` and `total_before_limit` are also null when
         no lots could be read, as in the section: unknown, not none.
-        `travel_rings`: per ring, `minutes`, `area_ha`,
+        `travel_rings`: per ring, `minutes`, `area_acres`,
         `equivalent_radius_m`, `max_reach_m` and `reaches_edge`. `lz`:
         `nearest_any` and `nearest_preferred` (id, grade, distance, bearing,
         clear diameter); lz_candidates orders by distance before grade, so

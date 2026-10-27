@@ -127,6 +127,7 @@ async def test_every_tool_is_registered_with_a_description(server):
         "plan_medevac", "plan_initial_response", "plan_urban_search",
         "debrief_assignment",
         "key_status", "check_for_update", "save_export",
+        "list_data_sources", "fetch_raster", "query_features",
     }
     for tool in tools:
         assert tool.description and len(tool.description) > 40, (
@@ -557,7 +558,7 @@ async def test_buffer_geometry_answers_with_the_ribbon_and_its_width(server):
     result = await call(server, "buffer_geometry", geometry=line, distance_m=15)
     assert result["geometry"]["type"] == "Polygon"
     assert result["width_m"] == 30.0
-    assert result["area_ha"] == pytest.approx(6.75, abs=0.1)
+    assert result["area_acres"] == pytest.approx(16.68, abs=0.25)
 
 
 @pytest.mark.anyio

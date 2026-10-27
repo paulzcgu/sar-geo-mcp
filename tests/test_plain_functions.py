@@ -487,13 +487,13 @@ def test_a_context_built_without_build_reads_the_corpus_its_config_names(
     except TypeError:
         return                    # refused: norms are a required field
     assert bare.norms and bare.norms == load_norms(config.norms_path)
-    assert norms.assignment_norms(bare, "GROUND")["target_area_ha"]["p50"] == 10.0
+    assert norms.assignment_norms(bare, "GROUND")["target_area_acres"]["p50"] == 24.7
 
     _stub_staging(monkeypatch, routes=[_trail_through(PLS)])
     built = ServerContext.build(config)
     handle = staging.prepare_area(built, center_latitude=PLS[0], center_longitude=PLS[1],
                                   radius_m=400)["handle"]
-    target = boundary.BoundaryTarget(geometry=_square(PLS, 20))       # 0.16 ha
+    target = boundary.BoundaryTarget(geometry=_square(PLS, 20))       # 0.4 acres
     expected = boundary.describe_boundary(built, handle, target, resource_type="GROUND")
-    assert [flag["metric"] for flag in expected["norm_flags"]] == ["area_ha"]
+    assert [flag["metric"] for flag in expected["norm_flags"]] == ["area_acres"]
     assert boundary.describe_boundary(bare, handle, target, resource_type="GROUND") == expected

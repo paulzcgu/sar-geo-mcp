@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+from sar_geo_mcp.sources import osm as osm_source
 from sar_geo_mcp.config import CaltopoConfig
 from sar_geo_mcp.planning.area import (
     MAX_EXTENT_M,
@@ -95,7 +96,7 @@ class FakeReader:
 
 def stub_stage(monkeypatch, staged: list):
     from sar_geo_mcp.staging import write_manifest
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
     def fake_stage(subject, map_id, out_dir, *, cache_dir, buffer_m, fingerprint,
                    access="public", subject_kind="assignment", **kwargs):
@@ -243,7 +244,7 @@ def test_prepare_area_reuse_tops_up_a_directory_left_behind_by_an_older_query(
     assert result["reason"] == "already staged"
     assert any("topped it up" in w for w in result["warnings"])
     payload = json.loads((directory / "osm.json").read_text(encoding="utf-8"))
-    assert payload["query_version"] == linear.OSM_QUERY_VERSION
+    assert payload["query_version"] == osm_source.OSM_QUERY_VERSION
     assert payload["parking"] == [{"id": "parking-w1"}]
 
 
@@ -425,7 +426,7 @@ def test_an_outage_then_a_successful_top_up_stops_repeating_the_outage(monkeypat
     warning the manifest carries is still returned."""
     from sar_geo_mcp.staging import is_osm_outage_warning, osm_outage_warning, write_manifest
     from sar_geo_mcp.terrain import linear
-    from sar_geo_mcp.terrain.linear import OverpassUnavailable
+    from sar_geo_mcp.sources.osm import OverpassUnavailable
 
     outage = osm_outage_warning("OverpassUnavailable: every Overpass endpoint refused")
     other = "evt unavailable: OSError"
@@ -495,7 +496,7 @@ def test_a_version_3_file_under_a_stale_outage_drops_the_outage_and_keeps_the_re
     from sar_geo_mcp.planning.area import area_directory
     from sar_geo_mcp.staging import is_osm_outage_warning, write_manifest
     from sar_geo_mcp.terrain import linear
-    from sar_geo_mcp.terrain.linear import OverpassUnavailable
+    from sar_geo_mcp.sources.osm import OverpassUnavailable
 
     reader = FakeReader(tmp_path / "cache")
     directory = area_directory(reader.cache_dir, build_area(geometry=_square(PLS, 400)).key)
@@ -539,9 +540,9 @@ def test_ground_healed_before_0_17_1_stops_repeating_its_outage(monkeypatch, tmp
                    panels={}, warnings=["osm unavailable: ConnectTimeout: overpass-api.de",
                                         "evt unavailable: OSError"],
                    subject_kind="area")
-    _record_a_top_up(directory, linear.OSM_QUERY_VERSION)  # what 0.17.0's top-up wrote
+    _record_a_top_up(directory, osm_source.OSM_QUERY_VERSION)  # what 0.17.0's top-up wrote
     (directory / "osm.json").write_text(json.dumps(
-        {"routes": [], "parking": [], "query_version": linear.OSM_QUERY_VERSION}),
+        {"routes": [], "parking": [], "query_version": osm_source.OSM_QUERY_VERSION}),
         encoding="utf-8")
 
     result = prepare_area(reader, geometry=_square(PLS, 400))
@@ -571,7 +572,7 @@ def test_an_areas_osm_json_is_its_own_ground_whatever_wrote_it(monkeypatch, tmp_
                    subject_kind="area")
     (directory / "osm.json").write_text(json.dumps(
         {"routes": [{"id": "old-boundary"}], "parking": [],
-         "query_version": linear.OSM_QUERY_VERSION}), encoding="utf-8")
+         "query_version": osm_source.OSM_QUERY_VERSION}), encoding="utf-8")
 
     for _ in range(2):
         result = prepare_area(reader, geometry=_square(PLS, 400))
@@ -727,7 +728,7 @@ def _square(center, half_m):
 def _real_staging_with_overpass(monkeypatch, tmp_path, up: bool):
     from test_staging_subject import stub_fetchers
 
-    from sar_geo_mcp.terrain.linear import OverpassUnavailable
+    from sar_geo_mcp.sources.osm import OverpassUnavailable
 
     stub_fetchers(monkeypatch, tmp_path)
     if not up:
@@ -771,7 +772,7 @@ def test_a_forced_restage_over_other_ground_in_an_outage_reports_no_osm(monkeypa
     that could not fetch this ground's own."""
     from sar_geo_mcp.planning.area import area_directory
     from sar_geo_mcp.staging import is_osm_outage_warning, write_manifest
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
     reader = FakeReader(tmp_path / "cache")
     directory = area_directory(reader.cache_dir, build_area(geometry=_square(PLS, 400)).key)

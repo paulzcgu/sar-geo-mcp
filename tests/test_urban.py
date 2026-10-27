@@ -4,14 +4,17 @@ never across an arterial, pairing across water only two at a time."""
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 from shapely.geometry import LineString, Point, Polygon, box, mapping, shape
 from shapely.ops import unary_union
 
+from sar_geo_mcp.geo import HA_PER_ACRE
 from sar_geo_mcp.planning.urban import (
     NO_ARTERIALS_WARNING,
     group_blocks,
+    snap_outlines,
     street_links,
     urban_assignments,
     urban_params,
@@ -20,6 +23,9 @@ from sar_geo_mcp.planning.urban import (
 
 # Ground metres per map unit of 1: the squares below are drawn in metres.
 SCALE = 1.0
+#: A 2 ha target, as the tools take it: in acres. The grouping works in
+#: hectares, so this is exactly the 2 ha the town below was drawn for.
+TWO_HA = 2.0 / HA_PER_ACRE
 
 
 def _row(count, *, size=100.0, gap=20.0, y=0.0):
@@ -365,8 +371,8 @@ def test_the_default_target_is_the_corpus_median_for_the_resource():
 
 
 def test_urban_assignments_merge_the_towns_blocks(tmp_path):
-    result = _run(tmp_path, target_ha=2.0)
-    assert result["assumptions"]["grouping"]["target_ha"] == 2.0
+    result = _run(tmp_path, target_acres=TWO_HA)
+    assert result["assumptions"]["grouping"]["target_acres"] == 4.9
     assert result["assumptions"]["grouping"]["target_source"] == "given"
     (assignment,) = result["assignments"]              # the street and the apartments
     facts = assignment["facts"]
@@ -379,18 +385,18 @@ def test_urban_assignments_merge_the_towns_blocks(tmp_path):
 def test_urban_assignments_default_to_the_ground_norm(tmp_path):
     result = _run(tmp_path)
     grouping = result["assumptions"]["grouping"]
-    assert grouping["target_ha"] == 10.0
+    assert grouping["target_acres"] == 24.7
     assert grouping["target_source"] == "corpus median for GROUND"
 
 
 def test_arterials_unknown_on_old_ground_is_said(tmp_path):
-    result = _run(tmp_path, target_ha=2.0, query_version=4)
+    result = _run(tmp_path, target_acres=TWO_HA, query_version=4)
     assert NO_ARTERIALS_WARNING.format(version=4) in result["warnings"]
     assert result["assumptions"]["grouping"]["arterials"] == "unknown"
 
 
 def test_markers_travel_with_the_group(tmp_path):
-    result = _run(tmp_path, target_ha=2.0, building_markers=True)
+    result = _run(tmp_path, target_acres=TWO_HA, building_markers=True)
     (assignment,) = result["assignments"]
     assert len(assignment["markers"]) == 16 == assignment["facts"]["markers"]
     assert result["summary"]["markers"] == 16
@@ -401,8 +407,8 @@ def test_the_urban_set_holds_assignment_candidates(tmp_path):
 
     directory = _town_dir(tmp_path)
     parcels, roofs = town()
-    params = urban_params(target_ha=2.0, resource_type="ground", max_distance_m=None)
-    assert params == {"method": 3, "target_ha": 2.0, "resource_type": "GROUND",
+    params = urban_params(target_acres=TWO_HA, resource_type="ground", max_distance_m=None)
+    assert params == {"method": 4, "target_acres": TWO_HA, "resource_type": "GROUND",
                       "max_distance_m": None}
     cset = urban_set(directory, params, handle="aoi-test", norms=None, wms_base_url=WMS,
                      cache_dir=tmp_path / "cache", fetch=fake_fetch(parcels, roofs))
@@ -424,15 +430,15 @@ def test_a_target_left_to_the_norms_puts_them_in_the_set_id(tmp_path):
     agency = load_norms()
     agency["area_ha_by_resource"]["medians"]["GROUND"] = 1.0
 
-    def set_id(target_ha, norms):
-        return make_set_id("urban", urban_params(target_ha=target_ha, resource_type="GROUND",
+    def set_id(target_acres, norms):
+        return make_set_id("urban", urban_params(target_acres=target_acres, resource_type="GROUND",
                                                  max_distance_m=None, norms=norms))
 
     assert set_id(None, None) == set_id(None, load_norms())
     assert set_id(None, agency) != set_id(None, None)
     assert set_id(2.0, agency) == set_id(2.0, None)
     with pytest.raises(ValueError, match="made under norms"):
-        urban_set(tmp_path, urban_params(target_ha=None, resource_type="GROUND",
+        urban_set(tmp_path, urban_params(target_acres=None, resource_type="GROUND",
                                          max_distance_m=None, norms=agency),
                   handle="aoi-test", norms=None, wms_base_url=None, cache_dir=None)
 
@@ -501,7 +507,7 @@ def test_every_house_is_counted_once_in_the_assignment_drawn_round_it(
     blocks, no assignment is a sliver of no area carrying houses, and every
     house marker lies inside its own assignment's polygon and no other's."""
     blocks = _fake_blocks(monkeypatch, layout)
-    result = urban_assignments(tmp_path, target_ha=2.0, building_markers=True)
+    result = urban_assignments(tmp_path, target_acres=TWO_HA, building_markers=True)
     assignments = result["assignments"]
 
     assert sorted(name for a in assignments for name in a["blocks"]) == sorted(
@@ -513,7 +519,7 @@ def test_every_house_is_counted_once_in_the_assignment_drawn_round_it(
     assert summary["markers"] == sum(len(block["markers"]) for block in blocks)
     for assignment in assignments:
         polygon = shape(assignment["geometry"])
-        assert assignment["facts"]["area_ha"] > 0, assignment["name"]
+        assert assignment["facts"]["area_acres"] > 0, assignment["name"]
         outside = [marker["properties"]["title"] for marker in assignment["markers"]
                    if not polygon.contains(shape(marker["geometry"]))]
         assert outside == [], f"{assignment['name']} counts houses outside it"
@@ -530,7 +536,7 @@ def test_blocks_hemmed_two_deep_are_counted_in_the_assignment_drawn_round_them(
     their streets, blocks, parcels, buildings and markers in its facts, and
     no assignment of their own."""
     _fake_blocks(monkeypatch, TOWN_TWO_DEEP)
-    result = urban_assignments(tmp_path, target_ha=2.0, building_markers=True)
+    result = urban_assignments(tmp_path, target_acres=TWO_HA, building_markers=True)
     (assignment,) = result["assignments"]
     assert assignment["name"] == "Oak Street +2"
     assert assignment["blocks"] == ["Oak Street", "Elm Court", "Ash Lane"]
@@ -539,9 +545,9 @@ def test_blocks_hemmed_two_deep_are_counted_in_the_assignment_drawn_round_them(
     assert (facts["blocks"], facts["parcels"], facts["buildings"], facts["markers"]) == (
         3, 71, 64, 64)
     assert len(assignment["markers"]) == 64
-    assert facts["area_ha"] == pytest.approx(4.0, abs=0.01) and facts["parts"] == 1
+    assert facts["area_acres"] == pytest.approx(4.0 / HA_PER_ACRE, abs=0.02) and facts["parts"] == 1
     assert result["summary"]["count"] == 1
-    assert result["summary"]["area_ha"]["min"] == facts["area_ha"]
+    assert result["summary"]["area_acres"]["min"] == facts["area_acres"]
 
 
 def test_a_hemmed_water_pair_inside_the_host_warns_of_no_water(monkeypatch, tmp_path):
@@ -551,7 +557,7 @@ def test_a_hemmed_water_pair_inside_the_host_warns_of_no_water(monkeypatch, tmp_
     _fake_blocks(monkeypatch, [("Oak Street", TWO_COURTYARDS[0], 60, 55),
                                ("Elm Court", TWO_COURTYARDS[1], 4, 4),
                                ("Ash Court", TWO_COURTYARDS[2], 4, 4)])
-    result = urban_assignments(tmp_path, target_ha=2.0)
+    result = urban_assignments(tmp_path, target_acres=TWO_HA)
     (assignment,) = result["assignments"]
     assert assignment["facts"]["water_links"] == 0
     # Oak Street alone is past the 2.8 ha ceiling: the courts did not carry it.
@@ -569,9 +575,94 @@ def test_a_hemmed_join_past_the_ceiling_is_said(monkeypatch, tmp_path):
     the assignment past the ceiling, its warnings name the block."""
     _fake_blocks(monkeypatch, [("Oak Street", SLOTTED_SMALL, 40, 40),
                                ("Elm Court", box(78, 71, 177, 89), 5, 5)])
-    result = urban_assignments(tmp_path, target_ha=2.0)
+    result = urban_assignments(tmp_path, target_acres=TWO_HA)
     (assignment,) = result["assignments"]
     assert assignment["blocks"] == ["Oak Street", "Elm Court"]
     (warning,) = assignment["warnings"]
     assert warning.startswith("Elm Court, most of whose ground lies inside this assignment's")
-    assert "2.83 ha, past the 2.80 ha (140 % of the target)" in warning
+    assert "7.0 acres, past the 6.9 acres (140 % of the target)" in warning   # 2.83 ha, 2.8 ha
+
+
+def test_neighbours_across_a_street_are_snapped_to_one_shared_edge():
+    """Two assignments a 20 m street apart meet on its middle: no gap, no
+    overlap, one edge. Their outer edges, which face no other assignment,
+    stay where the blocks end."""
+    left, right = box(0, 0, 100, 100), box(120, 0, 220, 100)
+    snapped_left, snapped_right = snap_outlines([left, right], scale=SCALE)
+    assert snapped_left.covers(left) and snapped_right.covers(right)
+    assert snapped_left.intersection(snapped_right).area < 1.0
+    shared = snapped_left.boundary.intersection(snapped_right.boundary).length
+    assert shared > 90.0                               # the street's length, one edge
+    assert snapped_left.union(snapped_right).covers(box(100, 5, 120, 95))
+    # The street is split down its middle.
+    assert snapped_left.covers(Point(105, 50)) and snapped_right.covers(Point(115, 50))
+    # Nothing grows past the outer edges but the mouth of the street, a few
+    # metres where no centreline is known to stop it.
+    for snapped in (snapped_left, snapped_right):
+        min_x, min_y, max_x, max_y = snapped.bounds
+        assert min_x >= -6.0 and max_x <= 226.0 and min_y >= -6.0 and max_y <= 106.0
+
+
+def test_assignments_too_far_apart_are_not_snapped():
+    left, right = box(0, 0, 100, 100), box(300, 0, 400, 100)
+    snapped = snap_outlines([left, right], scale=SCALE)
+    assert snapped[0].symmetric_difference(left).area < 1.0
+    assert snapped[1].symmetric_difference(right).area < 1.0
+
+
+def test_where_two_neighbours_corners_meet_the_ground_beyond_is_left_alone():
+    """Two blocks side by side along one back edge: the street between them
+    is shared, but the open ground beyond their outer edge, near both
+    corners, is no one's - it is not between them."""
+    left, right = box(0, 0, 100, 100), box(110, 0, 210, 100)
+    snapped = snap_outlines([left, right], scale=SCALE)
+    assert not snapped[0].union(snapped[1]).intersects(Point(105, 115))
+
+
+def test_a_pocket_enclosed_by_assignments_is_given_to_the_nearest():
+    """A courtyard no block took, with assignments on every side, is
+    searched by the nearest rather than left a hole."""
+    ring = box(0, 0, 200, 200).difference(box(50, 50, 150, 150))
+    outer = ring.difference(box(0, 0, 100, 200))
+    inner = ring.intersection(box(0, 0, 100, 200))
+    snapped = snap_outlines([outer, inner], scale=SCALE)
+    assert snapped[0].union(snapped[1]).covers(Point(100, 100))
+    assert snapped[0].intersection(snapped[1]).area < 1.0
+
+
+def test_neighbours_either_side_of_a_street_meet_on_its_centreline():
+    """The street's centreline, not the middle of the gap, is the shared
+    edge: OpenStreetMap's line is the boundary a planner draws to."""
+    left, right = box(0, 0, 100, 100), box(120, 0, 220, 100)
+    street = LineString([(114, -50), (114, 150)])
+    snapped_left, snapped_right = snap_outlines([left, right], scale=SCALE, streets=[street])
+    assert snapped_left.intersection(snapped_right).area < 1.0
+    assert snapped_left.covers(Point(111, 50)) and snapped_right.covers(Point(117, 50))
+    shared = snapped_left.boundary.intersection(snapped_right.boundary)
+    assert shared.length > 90.0
+    assert all(abs(x - 114) <= 2.5 for x, _y in shared.envelope.exterior.coords)
+
+
+def test_an_edge_facing_a_street_is_drawn_out_to_its_centreline():
+    """A run's end faces its cross street 10 m away, with no assignment
+    across it: the edge goes to the centreline, and no farther, and runs
+    along the street no farther than the run's own width."""
+    near, far = box(0, 0, 100, 100), box(500, 0, 600, 100)
+    street = LineString([(110, -150), (110, 250)])
+    snapped, _far = snap_outlines([near, far], scale=SCALE, streets=[street])
+    assert snapped.covers(Point(108, 50))
+    assert not snapped.intersects(Point(113, 50))
+    assert not snapped.intersects(Point(108, 125))
+    assert not snapped.intersects(Point(108, -25))
+
+
+def test_a_v_shaped_gap_between_neighbours_is_shared_out():
+    """Two neighbours whose edges open at 60 degrees: the wedge between them,
+    seen from inside, has them only 120 degrees apart, and is still split
+    between them rather than left a slit."""
+    left = Polygon([(0, 0), (0, 100), (50, 100), (50, 0)])
+    right = Polygon([(60, 0), (60 + 100 * math.tan(math.radians(30)), 100), (200, 100),
+                     (200, 0)])
+    snapped = snap_outlines([left, right], scale=SCALE)
+    assert snapped[0].union(snapped[1]).covers(Point(60, 60))
+    assert snapped[0].intersection(snapped[1]).area < 1.0

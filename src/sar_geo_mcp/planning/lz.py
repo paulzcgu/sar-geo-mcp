@@ -68,7 +68,7 @@ import numpy as np
 
 from ..caltopo.wms import LAYERS
 from ..net_errors import safe_reason
-from .chips import GOOGLE_ATTRIBUTION, MAPBOX_ATTRIBUTION
+from ..sources.static_imagery import GOOGLE_ATTRIBUTION, MAPBOX_ATTRIBUTION
 from ..terrain.trees import TREES_METHOD, trees_on_grid
 
 #: Coarsest raster this tool will grade. At 3.9 m per pixel (the default
@@ -202,7 +202,7 @@ CHIP_SOURCES: tuple[tuple[str, str, str, str], ...] = tuple(
     for source, layer, attribution in (("caltopo-imagery", CHIP_LAYER, "CalTopo"),
                                        ("caltopo-naip", "n3", "CalTopo, USDA NAIP")))
 
-#: The keyed static-image sources (`planning/chips.py`), after the CalTopo
+#: The keyed static-image sources (`sources/static_imagery.py`), after the CalTopo
 #: ones and in this order: (source, label, attribution). Each is cut only
 #: when the server is configured with its key.
 STATIC_SOURCES: tuple[tuple[str, str, str], ...] = (
@@ -683,7 +683,7 @@ def _power_lines(payload: dict | None) -> tuple[list[dict] | None, str | None, l
     `kinds_checked` is `["line"]`, and a warning says distribution lines
     were never asked for and ground was staged, and possibly closed,
     without them."""
-    from ..terrain.linear import OSM_QUERY_VERSION_BARRIERS, OSM_QUERY_VERSION_MINOR_LINES
+    from ..sources.osm import OSM_QUERY_VERSION_BARRIERS, OSM_QUERY_VERSION_MINOR_LINES
 
     if payload is None:
         return None, MISSING_OSM_WARNING, []
@@ -766,7 +766,8 @@ def _closed_water(directory: Path, grid, osm: dict | None
     from shapely.geometry import Polygon
     from shapely.geometry import shape as shapely_shape
 
-    from ..terrain.evt import codes_at_cells, lifeform_of
+    from ..sources.landfire import lifeform_of
+    from ..terrain.evt import codes_at_cells
     from ..terrain.movement import CLOSED_LIFEFORMS
 
     shape = grid.elevation.shape
@@ -954,7 +955,7 @@ def _chip_picture(source: str, *, entry: dict, scale: float,
 
     A CalTopo source is fetched through the WMS path at a box of `CHIP_M`
     ground metres, and the picture is the panel's path. A static source is
-    asked through `planning/chips.py`, which computes the box its answer
+    asked through `sources/static_imagery.py`, which computes the box its answer
     covers - Google's whole zoom makes it only near `CHIP_M` - and the
     picture is its bytes, held in memory and never written: nothing would
     read them back, Mapbox's satellite style answers in JPEG, and Google's
@@ -965,7 +966,7 @@ def _chip_picture(source: str, *, entry: dict, scale: float,
 
     from PIL import Image
 
-    from .chips import google_request, mapbox_request
+    from ..sources.static_imagery import google_request, mapbox_request
 
     x, y = entry["_x"], entry["_y"]
     layer = {name: wms for name, _label, wms, _credit in CHIP_SOURCES}.get(source)
@@ -1078,7 +1079,7 @@ def lz_candidates(directory, *, center_latitude: float, center_longitude: float,
     injected so the tests need no network; it defaults to
     `caltopo.wms.fetch_panel`. `get_static` is the static-image getter for
     the keyed sources, injected likewise; it defaults to
-    `planning.chips.get_static`. Raises `ValueError` when the raster is too
+    `sources.static_imagery.get_static`. Raises `ValueError` when the raster is too
     coarse to grade, the two slope limits are out of order, `limit` is
     negative, `powerline_notice_m` is not above zero,
     `powerline_clearance_m` or `structure_clearance_m` is below zero, or no
@@ -1164,7 +1165,7 @@ def lz_candidates(directory, *, center_latitude: float, center_longitude: float,
 
     from ..geo import to_wgs84_geojson
     from ..terrain.grid import load_assignment_grid
-    from ..terrain.linear import OSM_QUERY_VERSION_PARKING, OSM_QUERY_VERSION_ROUTE_TAGS
+    from ..sources.osm import OSM_QUERY_VERSION_PARKING, OSM_QUERY_VERSION_ROUTE_TAGS
     from ..terrain.vegetation import VEGETATION_PROXY_THRESHOLD
     from .parking import _named_ways, _nearest_way_index
 
@@ -1172,7 +1173,7 @@ def lz_candidates(directory, *, center_latitude: float, center_longitude: float,
     if fetch is None:
         from ..caltopo.wms import fetch_panel as fetch
     if get_static is None:
-        from .chips import get_static
+        from ..sources.static_imagery import get_static
     grid = load_assignment_grid(directory)
     pixel_m = float(grid.pixel_size_m)
     if pixel_m > MAX_PIXEL_M:

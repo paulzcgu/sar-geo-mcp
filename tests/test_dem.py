@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from sar_geo_mcp.terrain.dem import (
+from sar_geo_mcp.sources.dem import (
     MAX_DEM_PIXELS,
     TIFF_MAGIC_BE,
     TIFF_MAGIC_LE,
@@ -133,7 +133,7 @@ def test_the_returned_raster_is_exactly_what_was_asked_for(tmp_path):
 
 @pytest.mark.live
 def test_live_dem_fetch_and_read(tmp_path):
-    from sar_geo_mcp.terrain.dem import read_dem
+    from sar_geo_mcp.sources.dem import read_dem
 
     path = fetch_dem(BBOX, 512, 512, cache_dir=tmp_path)
     elevations, resolution_m = read_dem(path)

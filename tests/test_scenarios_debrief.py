@@ -489,8 +489,7 @@ def test_failed_metrics_fail_an_area_s_coverage_naming_why(ctx, monkeypatch):
 
 @pytest.mark.parametrize("saved, width", [
     (False, " and no metrics are saved on this ground, so this line's corridor is "
-            "coverage_for's default width, as its own warning says (the --corridor-width "
-            "that warning names is a command-line option; no tool here takes it)"),
+            "coverage_for's default width, as its own warning says"),
     (True, ", so this line's corridor width is the one terrain_metrics saved on this ground "
            "at an earlier call"),
 ])
@@ -687,8 +686,7 @@ def test_coverage_of_a_line_with_no_metrics_saved_or_asked_for_runs_saying_so(ct
     assert coverage["warnings"][-1] == (
         "metrics was left out of include and no metrics are saved on this ground, so this "
         "line's corridor is coverage_for's default width, as its own warning says - add "
-        "\"metrics\" to include for the width this ground's vegetation gives (the "
-        "--corridor-width that warning names is a command-line option; no tool here takes it)")
+        "\"metrics\" to include for the width this ground's vegetation gives")
 
 
 def test_a_line_whose_metrics_an_earlier_call_saved_carries_no_scenario_note(ctx, monkeypatch):
@@ -793,7 +791,7 @@ def test_a_reused_assignment_ground_still_reports_what_it_lacks(monkeypatch, tmp
     from test_handles import SQUARE as QA103, FakeAssignment, FakeReader
 
     from sar_geo_mcp.staging import osm_outage_warning, write_manifest
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
     evt = "evt unavailable: HTTPStatusError"
     outage = osm_outage_warning("OverpassUnavailable: 504")
@@ -1168,7 +1166,8 @@ def test_the_access_counts_read_the_routes_staging_writes(ctx, monkeypatch, tmp_
     the ways in are the trail's and the road's crossings, not the creek's."""
     from test_boundary import ORIGIN_X, ORIGIN_Y, m
 
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION, routes_for
+    from sar_geo_mcp.terrain.linear import routes_for
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
     def node(x, y):
         lon, lat = m(x, y)

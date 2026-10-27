@@ -25,7 +25,7 @@ RIDGE_ASSUMPTIONS = {
     "method": "D8 flow accumulation on the negated elevation",
     "min_contributing_area_m2": HYDRO_ASSUMPTIONS["min_contributing_area_m2"],
     "min_channel_length_m": HYDRO_ASSUMPTIONS["min_channel_length_m"],
-    "note": ("the anatomy corpus used a 2 ha threshold; this detector keeps "
+    "note": ("the anatomy corpus used a 5-acre threshold; this detector keeps "
              "the drainage detector's finer one"),
 }
 

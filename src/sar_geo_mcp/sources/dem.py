@@ -1,4 +1,4 @@
-"""USGS 3DEP elevation access.
+"""USGS 3DEP elevation: the source every measurement stands on.
 
 The rendered CalTopo layers cannot answer 'how deep' or 'how steep' in real
 units. This module supplies the float32 elevation grid that all measurement
@@ -13,7 +13,9 @@ from urllib.parse import urlencode
 import numpy as np
 
 from ..geo import Bbox
+from .base import Area, RasterResult, RasterSource, SourceInfo
 from ..cache import atomic_output, atomic_write_bytes, note_hit, note_write
+from ..cache.layout import source_folder
 from ..tiles import (
     TILE_PX,
     Tile,
@@ -28,6 +30,10 @@ EXPORT_URL = (
     "3DEPElevation/ImageServer/exportImage"
 )
 MAX_DEM_PIXELS = 8000
+
+#: This source's folder under the cache, and where it wrote before 0.43.0.
+FOLDER = "usgs_3dep"
+LEGACY_CACHE = ("dem_*.tif", "tiles/dem")
 
 TIFF_MAGIC_LE = b"II\x2a\x00"
 TIFF_MAGIC_BE = b"MM\x00\x2a"
@@ -74,11 +80,25 @@ def _http_get(url: str) -> bytes:
     return bytes_with_retry(url)
 
 
+def dem_folder(cache_dir: Path | str) -> Path:
+    """This source's folder under `cache_dir`, older files moved in."""
+    return source_folder(cache_dir, FOLDER, LEGACY_CACHE)
+
+
+def tile_key(tile: Tile) -> str:
+    """One elevation tile's index key: what eviction holds for staged ground."""
+    return f"{FOLDER}/{tile.key('dem', 'tif')}"
+
+
+def tile_path(cache_dir: Path | str, tile: Tile) -> Path:
+    return dem_folder(cache_dir) / tile.key("dem", "tif")
+
+
 def fetch_dem_tile(tile: Tile, cache_dir: Path,
                    get_bytes: Callable[[str], bytes] = _http_get) -> Path:
     """One cached elevation tile, shared by every request that touches it."""
     cache_dir = Path(cache_dir)
-    destination = cache_dir / tile.key("dem", "tif")
+    destination = tile_path(cache_dir, tile)
     if destination.exists():
         note_hit(cache_dir, destination)
         return destination
@@ -131,7 +151,7 @@ def fetch_dem(
     # is no reason to redo the work on every read.
     canonical = f"{','.join(f'{v:.3f}' for v in bbox_3857)}|{width_px}|{height_px}|z{level}"
     key = hashlib.sha256(canonical.encode()).hexdigest()[:32]
-    destination = cache_dir / f"dem_{key}.tif"
+    destination = dem_folder(cache_dir) / f"dem_{key}.tif"
     if destination.exists():
         note_hit(cache_dir, destination)
         return destination
@@ -229,3 +249,34 @@ def read_dem_grid(path: Path) -> tuple[float, Bbox]:
             bounds.right,
             bounds.top,
         )
+
+
+class Usgs3depSource(RasterSource):
+    """USGS 3DEP elevation as a source: a float32 GeoTIFF of an area, built
+    from the shared tile grid the staging and prefetch paths use."""
+
+    info = SourceInfo(
+        name="usgs_3dep",
+        title="USGS 3DEP elevation",
+        kind="raster",
+        provider="U.S. Geological Survey, 3D Elevation Program",
+        default_url=EXPORT_URL,
+        attribution="USGS 3DEP",
+        coverage="US: 1 m lidar where flown, about 10 m elsewhere",
+        native_resolution_m=1.0,
+        notes=(
+            "Best available, mosaicked: asking for 1 m where only 10 m was flown "
+            "returns a smooth interpolation, not detail.",
+            "Bare earth: no boulders, downed timber or brush.",
+        ),
+    )
+
+    def fetch(self, area: Area, width_px: int, height_px: int,
+              **options) -> RasterResult:
+        if options:
+            raise ValueError(f"usgs_3dep takes no options; got {sorted(options)}")
+        get_bytes = self.transport.get_bytes if self.transport else _http_get
+        path = fetch_dem(area.bbox_3857, width_px, height_px, self.require_cache(),
+                         get_bytes=get_bytes)
+        return RasterResult(path=path, bbox_3857=area.bbox_3857, width_px=width_px,
+                            height_px=height_px, attribution=self.info.attribution)

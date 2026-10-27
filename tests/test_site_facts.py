@@ -186,7 +186,7 @@ def test_bench_and_landing_get_their_own_cover_not_a_shared_ring(tmp_path):
     (Northern California Coastal Scrub, Shrub) east, split so the face's two
     ends fall in different halves.
     """
-    from sar_geo_mcp.terrain.evt import load_lifeform_table
+    from sar_geo_mcp.sources.landfire import load_lifeform_table
 
     table = load_lifeform_table()
     tree = next(code for code, (lf, _, _) in table.items() if lf == "Tree")
@@ -210,7 +210,7 @@ def test_bench_and_landing_get_their_own_cover_not_a_shared_ring(tmp_path):
 def test_a_scrub_bench_above_a_clean_face_is_visible(tmp_path):
     """The rule, made measurable: brush on the ground the operation stands
     on disqualifies the site even when the face itself is clear."""
-    from sar_geo_mcp.terrain.evt import load_lifeform_table
+    from sar_geo_mcp.sources.landfire import load_lifeform_table
 
     table = load_lifeform_table()
     tree = next(code for code, (lf, _, _) in table.items() if lf == "Tree")

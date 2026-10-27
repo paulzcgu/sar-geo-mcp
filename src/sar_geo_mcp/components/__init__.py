@@ -8,11 +8,11 @@ wraps each function as an MCP tool that only calls it.
 from __future__ import annotations
 
 from . import (caltopo, cache, candidates, coords, files, geometry, ground,
-               norms, setup, staging)
+               norms, setup, sources, staging)
 
 LAYER = "component"
 MODULES = (caltopo, coords, geometry, staging, ground, norms, candidates, cache,
-           files, setup)
+           files, setup, sources)
 
 
 def register(mcp, ctx) -> None:

@@ -17,7 +17,7 @@ from ._sections import (
     check_point,
     check_radius,
     check_resource_type,
-    check_target_ha,
+    check_target_acres,
     check_urban_overrides,
     check_urban_radius,
     ground_handle,
@@ -57,7 +57,7 @@ DEFAULT_SEARCH_RADIUS_M = radius_in_metres(radius=0.5, radius_unit="mi")
 #: so an override may not: {section: {keyword: the argument}}. The urban
 #: entry covers both tools the section calls; the export's two keep the
 #: drafts' resource type and house markers those of the assignments.
-SCENARIO_SETS = {"urban": {"target_ha": "target_ha", "resource_type": "resource_type",
+SCENARIO_SETS = {"urban": {"target_acres": "target_acres", "resource_type": "resource_type",
                            "building_markers": "building_markers"},
                  "parking": {"limit": "parking_limit"},
                  "medical": {"per_category": "medical_per_category"},
@@ -82,7 +82,7 @@ NOTE = ("No verdict: this lays out what populated_areas, urban_assignments, "
 
 def plan_urban_search(ctx: ServerContext, latitude: float, longitude: float,
                       radius: float | None = None, radius_unit: RadiusUnit = "m",
-                      radius_m: float | None = None, target_ha: float | None = None,
+                      radius_m: float | None = None, target_acres: float | None = None,
                       resource_type: str = "GROUND", building_markers: bool = False,
                       map_id: str = "", public: bool = True,
                       include: list[UrbanSearchSection] | None = None,
@@ -99,7 +99,7 @@ def plan_urban_search(ctx: ServerContext, latitude: float, longitude: float,
     search_radius = radius_in_metres(radius_m, radius, radius_unit)
     search_radius = DEFAULT_SEARCH_RADIUS_M if search_radius is None else search_radius
     check_radius("radius", search_radius, latitude=latitude, longitude=longitude)
-    check_target_ha(target_ha)
+    check_target_acres(target_acres)
     check_resource_type(resource_type)
     if not isinstance(building_markers, bool):
         # It names a different set and draws a marker on every roof: a
@@ -127,7 +127,7 @@ def plan_urban_search(ctx: ServerContext, latitude: float, longitude: float,
     outcomes = {
         "urban": guard(ctx, lambda: urban_section(
             ctx, ground_handle(staging, "search"), radius_m=search_radius,
-            target_ha=target_ha, resource_type=resource_type,
+            target_acres=target_acres, resource_type=resource_type,
             building_markers=building_markers,
             overrides=keywords["urban"])) if "urban" in asked else skipped(),
         "parking": guard(ctx, lambda: parking_section(
@@ -198,7 +198,7 @@ def register(mcp, ctx) -> None:
     def _plan_urban_search_tool(latitude: float, longitude: float,
                                 radius: float | None = None, radius_unit: RadiusUnit = "m",
                                 radius_m: float | None = None,
-                                target_ha: float | None = None,
+                                target_acres: float | None = None,
                                 resource_type: str = "GROUND",
                                 building_markers: bool = False,
                                 map_id: str = "", public: bool = True,
@@ -278,9 +278,9 @@ def register(mcp, ctx) -> None:
         `urban_assignments` then merges blocks, smallest first, along the
         streets that join them (a cul-de-sac into the road it opens onto) -
         never two blocks that only back onto each other, unless one is left
-        under 30 % of the target - into assignments of about `target_ha`
-        (default: the corpus median for `resource_type`, 10 ha for GROUND;
-        hand-drawn door-to-door assignments run 1 to 4 ha, so about 2.5 for
+        under 30 % of the target - into assignments of about `target_acres`
+        (default: the corpus median for `resource_type`, 25 acres for GROUND;
+        hand-drawn door-to-door assignments run 2.5 to 10 acres, so about 6 for
         teams of that size), never across an arterial - a motorway, trunk,
         primary or secondary road - and never past 140 % of the target;
         small groups still left pair across water, two at most. So every
@@ -289,25 +289,27 @@ def register(mcp, ctx) -> None:
         search radius of the centre (`max_distance_m`, the radius unless
         overridden), whole: the ring is extended out to the back fences
         beyond the nearest street, never cut. Lot lines are read over the
-        search circle and 200 m round it, so a block wholly outside the
-        circle is never drawn, whatever `max_distance_m` says: to search
-        wider, pass a larger radius. `set_id` names the
+        search circle and 200 m round it, then twice as far again while a
+        kept block runs into the edge of what was read, up to 1,000 m past
+        the circle, so a street the circle reaches is read to its end. A
+        block the circle does not reach is never drawn, whatever
+        `max_distance_m` says: to search wider, pass a larger radius. `set_id` names the
         assignment set, `created_at` dates it and `reused` says it was read
         back rather than drawn again. `assignments`, nearest the centre
         first, each with `id` (for `get_candidate`, with the section's
         `handle`, which returns its polygon, its block names and any house
         markers), `name` (the main street and "+N" others), `streets`,
-        `blocks` (how many), `parcels`, `buildings`, `area_ha`, `point`
+        `blocks` (how many), `parcels`, `buildings`, `area_acres`, `point`
         (inside it), `distance_from_center_m` and `bearing_from_center_deg`,
         `parts` (over 1: the outline is in pieces, drafted as one assignment
         each), `water_links` (parts joined across water by a strip drawn for
         the map only - travel between them by road), `markers` (how many
         house markers, only with `building_markers`: `get_candidate` and the
         draft file carry the markers themselves) and its `warnings`. Then
-        `count`, `target_ha` and `target_source` (given, or the corpus
+        `count`, `target_acres` and `target_source` (given, or the corpus
         median for `resource_type`; for a type the corpus has no median
-        for - a typo such as DOGS - the median of every assignment, 9.1 ha
-        in the shipped corpus, and a warning names the type), `area_ha`
+        for - a typo such as DOGS - the median of every assignment, 22.5 acres
+        in the shipped corpus, and a warning names the type), `area_acres`
         (min, median, max and total; null with no assignment), `parcels`,
         `buildings`, `parcels_left_out` (built-up lots in runs too short to
         be a block: in no assignment) and, with markers, `markers`.
@@ -319,7 +321,7 @@ def register(mcp, ctx) -> None:
         `warnings` the assignments do not already give, and `detail_call`.
         Ground with no populated block in the circle - rural lots, or no lot
         lines drawn there - answers "ok" with `assignments` empty, `count` 0
-        and `area_ha` null, and a warning says which: an empty list is
+        and `area_acres` null, and a warning says which: an empty list is
         nothing found, never a failure. Without OpenStreetMap on the staged
         ground, lots are grouped by adjacency alone, streets are unnamed and
         arterials unknown, and the warnings say so. When urban_assignments
@@ -423,7 +425,7 @@ def register(mcp, ctx) -> None:
 
         `summary` - the facts to read first, one block per section asked for
         (the export's are its paths, in `exports`), null when that section did
-        not answer. `urban`: `count`, `target_ha`, `area_ha` (min, median and
+        not answer. `urban`: `count`, `target_acres`, `area_acres` (min, median and
         max - the spread of sizes round the target - and the total ground,
         null with no assignment), `parcels` and `buildings`.
         `parking`: `count`, `total_before_limit` and the `nearest` site (id,
@@ -473,13 +475,13 @@ def register(mcp, ctx) -> None:
         keywords not under a tool; a tool the urban section does not call;
         a keyword the feature does not take, the refusal listing what it
         does; and a keyword plan_urban_search sets itself - the handle, the
-        centre, `target_ha`, `resource_type` and `building_markers` (its own
+        centre, `target_acres`, `resource_type` and `building_markers` (its own
         arguments, also for the export's `resource_type` and
         `include_markers`), the set the export draws (`set_id`,
         `candidate_ids`), and `limit` and `per_category`, which are
         `parking_limit` and `medical_per_category` here. Bad coordinates,
         an unknown or empty `include`, a radius `prepare_area` or
-        populated_areas would refuse, a `target_ha` not above zero, a
+        populated_areas would refuse, a `target_acres` not above zero, a
         `building_markers` that is not true or false, a negative limit, a
         block rule out of range, a marker colour CalTopo cannot read (null
         included) and an export `label_prefix` caltopo_export would refuse
@@ -518,7 +520,7 @@ def register(mcp, ctx) -> None:
         """
         return plan_urban_search(
             ctx, latitude=latitude, longitude=longitude, radius=radius,
-            radius_unit=radius_unit, radius_m=radius_m, target_ha=target_ha,
+            radius_unit=radius_unit, radius_m=radius_m, target_acres=target_acres,
             resource_type=resource_type, building_markers=building_markers,
             map_id=map_id, public=public, include=include, parking_limit=parking_limit,
             medical_per_category=medical_per_category, overrides=overrides)

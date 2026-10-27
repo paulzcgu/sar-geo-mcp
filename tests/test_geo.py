@@ -149,8 +149,8 @@ def test_a_buffered_line_is_a_ribbon_twice_the_distance_wide():
     assert width_m == pytest.approx(30.0, rel=0.01)
     assert result["distance_m"] == 15.0
     assert result["width_m"] == 30.0
-    # 2,226 m by 30 m is 6.68 ha, plus a 15 m disc for the two round ends.
-    assert result["area_ha"] == pytest.approx(6.75, abs=0.1)
+    # 2,226 m by 30 m is 16.5 acres, plus a 15 m disc for the two round ends.
+    assert result["area_acres"] == pytest.approx(16.68, abs=0.25)
 
 
 def test_a_buffered_line_has_round_ends_like_caltopo():
@@ -190,9 +190,9 @@ def test_a_polygon_is_widened_too():
 
     grown = buffer_geometry_wgs84(SQUARE, 100.0)
     assert grown["geometry"]["type"] == "Polygon"
-    # The square is 3,543 m by 4,453 m of ground (1,578 ha); a 100 m ring
-    # round it adds about 160 ha.
-    assert 1700 < grown["area_ha"] < 1800
+    # The square is 3,543 m by 4,453 m of ground (3,899 acres); a 100 m ring
+    # round it adds about 400 acres.
+    assert 4200 < grown["area_acres"] < 4450
 
 
 @pytest.mark.parametrize("distance", [0, -1, 1001, float("nan"), "wide"])
@@ -279,8 +279,8 @@ def test_a_cut_ribbon_still_measures_the_ribbon_not_the_ground_it_rings():
     drawing did."""
     from sar_geo_mcp.geo import buffer_geometry_wgs84
 
-    assert (buffer_geometry_wgs84(LOOP, 15.0, single_ring=True)["area_ha"]
-            == pytest.approx(buffer_geometry_wgs84(LOOP, 15.0)["area_ha"]))
+    assert (buffer_geometry_wgs84(LOOP, 15.0, single_ring=True)["area_acres"]
+            == pytest.approx(buffer_geometry_wgs84(LOOP, 15.0)["area_acres"]))
 
 
 def test_single_ring_leaves_a_ribbon_that_encloses_nothing_alone():

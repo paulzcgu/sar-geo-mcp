@@ -17,6 +17,7 @@ from PIL import Image
 
 from ..geo import Bbox
 from ..cache import atomic_output, atomic_write_bytes, note_hit, note_write
+from ..cache.layout import source_folder
 from ..tiles import (
     TILE_PX,
     Tile,
@@ -27,6 +28,12 @@ from ..tiles import (
 )
 
 MAX_PIXELS = 1024
+
+#: This source's folder under the cache (`sources.caltopo_wms`), and where it
+#: wrote before 0.43.0: its grid tiles, and its panels named
+#: "<layers>_<32 hex>.png" at the root.
+FOLDER = "caltopo_wms"
+LEGACY_CACHE = ("tiles/wms-*", "*_" + "[0-9a-f]" * 32 + ".png")
 
 LAYERS: dict[str, str] = {
     "mbt": "MapBuilder Topo",
@@ -278,6 +285,15 @@ def _http_get(url: str) -> bytes:
     return response.content
 
 
+def wms_folder(cache_dir: Path | str) -> Path:
+    """This source's folder under `cache_dir`, older files moved in."""
+    return source_folder(cache_dir, FOLDER, LEGACY_CACHE)
+
+
+def panel_tile_path(cache_dir: Path | str, layers: list[str], tile: Tile) -> Path:
+    return wms_folder(cache_dir) / tile.key(f"wms-{'-'.join(layers)}", "png")
+
+
 def fetch_panel(
     base_url: str,
     layers: list[str],
@@ -323,7 +339,7 @@ def fetch_panel(
         resample = resample_filter_for(layers)
     level = level_for(bbox_3857, width_px, height_px)
     key = cache_key(layers, bbox_3857, width_px, height_px, resample)
-    destination = cache_dir / f"{'-'.join(layers)}_{key}.png"
+    destination = wms_folder(cache_dir) / f"{'-'.join(layers)}_{key}.png"
     if destination.exists():
         note_hit(cache_dir, destination)
         return destination
@@ -376,7 +392,7 @@ def fetch_panel_tile(base_url: str, layers: list[str], tile: Tile,
     `prefetch.py`, the only caller of this function, is untouched by it.
     """
     cache_dir = Path(cache_dir)
-    destination = cache_dir / tile.key(f"wms-{'-'.join(layers)}", "png")
+    destination = panel_tile_path(cache_dir, layers, tile)
     if destination.exists():
         note_hit(cache_dir, destination)
         return destination

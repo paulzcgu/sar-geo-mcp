@@ -350,8 +350,7 @@ def _compute_line_coverage(data_dir: Path, teams: list[str], zone,
             f"no terrain_metrics.json for this line assignment; using the "
             f"default {full_width:.0f} m corridor "
             f"({DEFAULT_CORRIDOR_HALF_WIDTH_M:.0f} m half-width). Call the "
-            f"`terrain_metrics` tool first for a vegetation-adjusted width, or "
-            "pass --corridor-width."
+            f"`terrain_metrics` tool first for a vegetation-adjusted width."
         )
 
     if terrain is not None:

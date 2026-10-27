@@ -34,7 +34,8 @@ from sar_geo_mcp.planning.boundary import (
 )
 from sar_geo_mcp.planning.norms import load_norms
 from sar_geo_mcp.terrain.features.base import DEM_VOID_WARNING
-from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
+from sar_geo_mcp.geo import M2_PER_ACRE
 
 ORIGIN_X, ORIGIN_Y = -13618826.5, 4486605.0
 TRANSFORM = from_origin(ORIGIN_X, ORIGIN_Y, 10.0, 10.0)
@@ -173,7 +174,7 @@ def test_a_polygon_traced_along_a_trail_reports_trail_on_that_edge(tmp_path):
     assert anatomy.boundary.straight_pct == pytest.approx(100.0, abs=1.0)
     assert anatomy.boundary.straight_freehand_pct == pytest.approx(75.0, abs=4.0)
     assert anatomy.shape == "block" and anatomy.axis_feature is None
-    assert anatomy.size.area_ha == pytest.approx((200 * GROUND_PER_UNIT) ** 2 / 1e4, rel=0.02)
+    assert anatomy.size.area_acres == pytest.approx((200 * GROUND_PER_UNIT) ** 2 / M2_PER_ACRE, rel=0.02)
     assert anatomy.boundary.shared_pct is None
     assert "no map" in anatomy.boundary.shared_reason
     assert anatomy.assumptions["sample_spacing_m"] == SAMPLE_SPACING_M
@@ -203,7 +204,7 @@ def test_a_thin_ribbon_around_a_trail_is_a_corridor_with_that_axis(tmp_path):
     assert anatomy.axis_feature == "trail" and anatomy.axis_ratio == pytest.approx(1.0, abs=0.1)
     assert anatomy.size.width_m == pytest.approx(30 * GROUND_PER_UNIT, rel=0.1)
     assert anatomy.interior["trail_m"] == pytest.approx(300 * GROUND_PER_UNIT, rel=0.05)
-    assert [f["metric"] for f in anatomy.norm_flags] == ["area_ha"], anatomy.norm_flags
+    assert [f["metric"] for f in anatomy.norm_flags] == ["area_acres"], anatomy.norm_flags
 
 
 def test_a_line_target_is_a_line(tmp_path):
@@ -213,7 +214,7 @@ def test_a_line_target_is_a_line(tmp_path):
     anatomy = describe_boundary(data_dir, line, norms=load_norms())
     assert anatomy.shape == "line"
     assert anatomy.size.length_m == pytest.approx(300 * GROUND_PER_UNIT, rel=0.02)
-    assert anatomy.size.area_ha is None
+    assert anatomy.size.area_acres is None
     assert anatomy.boundary.composition_pct["trail"] == pytest.approx(100.0, abs=3.0)
     assert [f["metric"] for f in anatomy.norm_flags] == ["length_m"]
 
@@ -337,7 +338,7 @@ def test_a_multipolygon_target_is_described_as_its_largest_part(tmp_path):
 
     assert ("multipolygon target: described the largest of 2 parts "
             "(76% of the area); the others are not described") in anatomy.warnings
-    assert anatomy.size.area_ha == pytest.approx((180 * GROUND_PER_UNIT) ** 2 / 1e4, rel=0.02)
+    assert anatomy.size.area_acres == pytest.approx((180 * GROUND_PER_UNIT) ** 2 / M2_PER_ACRE, rel=0.02)
     assert anatomy.size.perimeter_m == pytest.approx(4 * 180 * GROUND_PER_UNIT, rel=0.02)
     assert anatomy.shape == "block"
 
@@ -436,11 +437,11 @@ def test_the_assumptions_say_which_band_the_area_flag_used(tmp_path):
     per_resource = describe_boundary(data_dir, target, norms=load_norms(),
                                      resource_type="dog_trail")
     assert "DOG_TRAIL" in per_resource.assumptions["area_band"]
-    # 2.5 ha of block against a 0.7 ha median: above that resource's band,
-    # where the whole corpus (2 to 31 ha) says nothing about it.
+    # 6 acres of block against a 1.7-acre median: above that resource's band,
+    # where the whole corpus (5 to 77 acres) says nothing about it.
     flags = {f["metric"]: f for f in per_resource.norm_flags}
-    assert "resource" in flags["area_ha"]["band"] and "above" in flags["area_ha"]["note"]
-    assert "area_ha" not in {f["metric"] for f in whole.norm_flags}
+    assert "resource" in flags["area_acres"]["band"] and "above" in flags["area_acres"]["note"]
+    assert "area_acres" not in {f["metric"] for f in whole.norm_flags}
 
     unknown = describe_boundary(data_dir, target, norms=load_norms(),
                                 resource_type="SUBMARINE")
@@ -595,7 +596,7 @@ def test_a_closed_line_target_is_walked_as_a_ring(tmp_path):
     anatomy = describe_boundary(data_dir, closed, norms=load_norms())
 
     assert anatomy.shape == "line"
-    assert anatomy.size.area_ha is None and anatomy.size.width_m is None
+    assert anatomy.size.area_acres is None and anatomy.size.width_m is None
     assert anatomy.size.length_m == pytest.approx(800 * GROUND_PER_UNIT, rel=0.02)
     # The trail crosses the start vertex and is reported once, not twice.
     assert len([r for r in anatomy.boundary.runs if r["follows"] == "trail"]) == 1
@@ -655,6 +656,6 @@ def test_a_multi_part_line_target_is_described_rather_than_refused(tmp_path):
 
     assert anatomy.shape == "line"
     assert anatomy.size.length_m == pytest.approx(350 * GROUND_PER_UNIT, rel=0.02)
-    assert anatomy.size.area_ha is None
+    assert anatomy.size.area_acres is None
     # The first part lies on the mapped trail, the second on nothing.
     assert anatomy.boundary.composition_pct["trail"] > 40.0

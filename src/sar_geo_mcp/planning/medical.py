@@ -13,18 +13,18 @@ glance.
 FOUR PUBLIC SOURCES, NO CREDENTIAL
 ----------------------------------
 - Hospitals: the HIFLD "Hospitals" layer (ORNL / DHS), as kept on ArcGIS
-  Online by FEMA (`HOSPITALS_URL`). HIFLD Open, the original home, was
+  Online by FEMA (`sources.hifld`). HIFLD Open, the original home, was
   retired in 2025; this copy carries the same schema and validation dates
   into 2025. It is the only free national list carrying trauma level,
   helipad, phone and address together. Override with `ZA_HOSPITALS_URL`.
-- Road distance and time: OSRM's `table` service (`OSRM_URL`), car profile,
+- Road distance and time: OSRM's `table` service (`sources.osrm`), car profile,
   OpenStreetMap roads. The default is the OSRM project's public demo, which
   is fine for an occasional planning call and nothing heavier; an agency
   should point `ZA_OSRM_URL` at its own instance.
 - Helipad cross-check: OpenStreetMap `aeroway=helipad|heliport` near each
   chosen hospital, through the same Overpass mirrors staging uses.
 - Inside the US at all: the US Census TIGERweb States layer
-  (`US_STATES_URL`), one point query. HIFLD is US-only, so a point in
+  (`sources.tigerweb`), one point query. HIFLD is US-only, so a point in
   another country gets a warning that its own hospitals are missing.
   Override with `ZA_US_STATES_URL`.
 
@@ -43,36 +43,16 @@ from __future__ import annotations
 
 import datetime as _dt
 import functools
-import math
-import os
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..net_errors import safe_reason
-
-#: The HIFLD Hospitals layer, FEMA's maintained copy. Verified 2026-10-20:
-#: 8,514 records, fields TRAUMA, HELIPAD, TELEPHONE, ADDRESS, VAL_DATE.
-HOSPITALS_URL = ("https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/"
-                 "services/Hospitals_RAPT/FeatureServer/6")
-HOSPITALS_URL_ENV = "ZA_HOSPITALS_URL"
-
-#: OSRM's public demo server. Its usage policy allows light use with an
-#: identifying User-Agent; an agency running its own sets `ZA_OSRM_URL`.
-OSRM_URL = "https://router.project-osrm.org"
-OSRM_URL_ENV = "ZA_OSRM_URL"
-
-#: US Census TIGERweb "States" layer: the 50 states, DC, Puerto Rico and the
-#: island areas, on land and inland water. Asked whether the point is inside
-#: the US at all, because HIFLD lists US hospitals only. Verified 2026-10-21:
-#: Vancouver, Windsor ON and 25 km off the California coast answer no
-#: feature; Blaine WA, Guam, Puerto Rico, Hawaii and Alaska answer their code.
-US_STATES_URL = ("https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/"
-                 "State_County/MapServer/0")
-US_STATES_URL_ENV = "ZA_US_STATES_URL"
-
-USER_AGENT = "sar-geo-mcp (search and rescue planning)"
+from ..sources.hifld import hospitals_url, query_hospitals
+from ..sources.osm import helipads_near
+from ..sources.osrm import osrm_table, osrm_url
+from ..sources.tigerweb import point_state, us_states_url
 
 CATEGORIES = ("medical_center", "trauma_center", "pediatric_trauma_center")
 CATEGORY_LABELS = {
@@ -453,147 +433,6 @@ def merge_campuses(facilities: Iterable[Facility]) -> list[Facility]:
 # --- The four network calls -----------------------------------------------------
 
 
-def hospitals_url() -> str:
-    return os.environ.get(HOSPITALS_URL_ENV, "").strip() or HOSPITALS_URL
-
-
-def osrm_url() -> str:
-    return (os.environ.get(OSRM_URL_ENV, "").strip() or OSRM_URL).rstrip("/")
-
-
-def us_states_url() -> str:
-    return (os.environ.get(US_STATES_URL_ENV, "").strip() or US_STATES_URL).rstrip("/")
-
-
-def _http_get(url: str, params: dict | None = None, *, timeout: float = 30.0):
-    """A GET with the shared retry policy and an identifying User-Agent."""
-    import httpx
-
-    from ..net import get_with_retry
-
-    request = httpx.Request("GET", url, params=params)
-    return get_with_retry(
-        str(request.url), attempts=3, base_delay=1.0, timeout=timeout,
-        get=functools.partial(httpx.get, headers={"User-Agent": USER_AGENT}))
-
-
-#: Asked of HIFLD; nothing more, to keep the answer small.
-HOSPITAL_FIELDS = ("ID,NAME,ADDRESS,CITY,STATE,ZIP,TELEPHONE,TYPE,STATUS,"
-                   "TRAUMA,HELIPAD,LATITUDE,LONGITUDE,VAL_DATE")
-
-
-def query_hospitals(latitude: float, longitude: float, radius_km: float,
-                    where: str = "STATUS = 'OPEN'", *, get=None,
-                    page_size: int = 2000, max_pages: int = 10) -> list[dict]:
-    """Open HIFLD hospitals within `radius_km` of the point, as raw features.
-
-    The service buffers in its own Web Mercator, which shrinks a ground
-    distance by cos(latitude), so the search distance is inflated by
-    1/cos(latitude) here and the caller trims by true ground distance.
-    """
-    get = get or _http_get
-    mercator_km = radius_km / max(math.cos(math.radians(latitude)), 0.05)
-    features: list[dict] = []
-    for page in range(max_pages):
-        params = {
-            "where": where, "geometry": f"{longitude},{latitude}",
-            "geometryType": "esriGeometryPoint", "inSR": "4326",
-            "spatialRel": "esriSpatialRelIntersects",
-            "distance": f"{mercator_km:.3f}", "units": "esriSRUnit_Kilometer",
-            "outFields": HOSPITAL_FIELDS, "returnGeometry": "true", "outSR": "4326",
-            "resultOffset": str(page * page_size), "resultRecordCount": str(page_size),
-            "orderByFields": "ID", "f": "json",
-        }
-        payload = get(f"{hospitals_url()}/query", params).json()
-        if "error" in payload:
-            raise RuntimeError("the hospital list refused the query: "
-                               f"{(payload['error'] or {}).get('code', 'error')}")
-        features.extend(payload.get("features") or [])
-        if not payload.get("exceededTransferLimit"):
-            break
-    return features
-
-
-def point_state(latitude: float, longitude: float, *, get=None) -> str | None:
-    """The US state, DC or territory the point is in, as its two-letter code
-    ("CA", "PR", "GU"), or None when it is in none of them - another country,
-    or offshore past the state's water."""
-    get = get or functools.partial(_http_get, timeout=10.0)
-    params = {
-        "geometry": f"{longitude},{latitude}", "geometryType": "esriGeometryPoint",
-        "inSR": "4326", "spatialRel": "esriSpatialRelIntersects",
-        "outFields": "STUSAB", "returnGeometry": "false", "f": "json",
-    }
-    payload = get(f"{us_states_url()}/query", params).json()
-    if "error" in payload:
-        raise RuntimeError("the state boundary service refused the query: "
-                           f"{(payload['error'] or {}).get('code', 'error')}")
-    features = payload.get("features") or []
-    if not features:
-        return None
-    return _clean((features[0].get("attributes") or {}).get("STUSAB")) or "US"
-
-
-def osrm_table(origin: tuple[float, float], destinations: list[tuple[float, float]],
-               *, get=None) -> dict[str, Any]:
-    """Road distance and drive time from `origin` to each destination, one
-    request. Points are (latitude, longitude).
-
-    Returns `origin_snap_m` and `origin_snap` (where OSRM joined the road),
-    and `legs`, one per destination: {distance_m, duration_s, snap_m}, with
-    distance and duration None when OSRM found no route.
-    """
-    get = get or _http_get
-    points = [origin, *destinations]
-    coordinates = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in points)
-    url = f"{osrm_url()}/table/v1/driving/{coordinates}"
-    payload = get(url, {"sources": "0", "annotations": "distance,duration"}).json()
-    if payload.get("code") != "Ok":
-        raise RuntimeError(f"the road router answered {payload.get('code', 'no code')}")
-    distances = (payload.get("distances") or [[]])[0]
-    durations = (payload.get("durations") or [[]])[0]
-    sources = payload.get("sources") or [{}]
-    targets = payload.get("destinations") or []
-    snapped = sources[0].get("location")
-    legs = []
-    for index in range(1, len(points)):
-        target = targets[index] if index < len(targets) else {}
-        legs.append({
-            "distance_m": distances[index] if index < len(distances) else None,
-            "duration_s": durations[index] if index < len(durations) else None,
-            "snap_m": target.get("distance"),
-        })
-    return {
-        "origin_snap_m": sources[0].get("distance"),
-        "origin_snap": ({"latitude": snapped[1], "longitude": snapped[0]}
-                        if snapped and len(snapped) == 2 else None),
-        "legs": legs,
-    }
-
-
-def osm_helipads_near(points: list[tuple[float, float]], radius_m: float = HELIPAD_MATCH_M,
-                      *, post=None) -> list[dict]:
-    """OSM helipads and heliports within `radius_m` of any point, one query:
-    [{latitude, longitude, name}]."""
-    if not points:
-        return []
-    if post is None:
-        from ..terrain.linear import _http_post as post
-    clauses = "".join(
-        f'nwr(around:{radius_m:.0f},{lat:.6f},{lon:.6f})[aeroway~"^(helipad|heliport)$"];'
-        for lat, lon in points)
-    payload = post(f"[out:json][timeout:25];({clauses});out center tags;")
-    pads = []
-    for element in payload.get("elements") or []:
-        centre = element.get("center") or element
-        if "lat" not in centre or "lon" not in centre:
-            continue
-        tags = element.get("tags") or {}
-        pads.append({"latitude": float(centre["lat"]), "longitude": float(centre["lon"]),
-                     "name": tags.get("name") or tags.get("operator")})
-    return pads
-
-
 # --- The answer ------------------------------------------------------------------
 
 
@@ -772,8 +611,8 @@ def _markers(latitude: float, longitude: float, rows: list[dict],
 
 def _assumptions(helicopter_speed_kmh: float, air_overhead_minutes: float) -> dict[str, Any]:
     # Hosts only, never a full URL: an override may carry a key or userinfo.
-    from ..terrain.linear import _host as host
-    from ..terrain.linear import reported_endpoints
+    from ..sources.osm import _host as host
+    from ..sources.osm import reported_endpoints
 
     return {
         "hospitals": {
@@ -855,7 +694,7 @@ def nearest_medical_facilities(
     check_osm_helipads: bool = True,
     query: Callable[..., list[dict]] = query_hospitals,
     route: Callable[..., dict] = osrm_table,
-    helipads: Callable[..., list[dict]] = osm_helipads_near,
+    helipads: Callable[..., list[dict]] = helipads_near,
     locate: Callable[..., str | None] = point_state,
 ) -> dict[str, Any]:
     """The closest medical centres, trauma centres and paediatric trauma
