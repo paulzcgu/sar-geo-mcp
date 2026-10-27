@@ -402,7 +402,7 @@ class AgencyWaysSource(FeatureSource):
         east, north = to_wgs84.transform(area.bbox_3857[2], area.bbox_3857[3])
         box = (west, south, east, north)
         key = hashlib.sha256(",".join(f"{v:.7f}" for v in box).encode()).hexdigest()[:32]
-        directory = self.require_cache() / key
+        directory = self.folder() / key
         directory.mkdir(parents=True, exist_ok=True)
         get = None
         if self.transport is not None:

@@ -5,6 +5,10 @@ not change a cached file's name, its index entry or the OSM query: any of
 those would make the existing cache unreadable (a full re-download, much of
 it from shared, rate-limited services) or quietly drop data from staging.
 A deliberate change updates the pin here in the same commit, and says why.
+
+0.43.0: each source writes into a folder of its own (`cache.layout`); the
+names inside it are unchanged, and an older cache is moved in, not fetched
+again (tests/test_cache_layout.py).
 """
 
 from __future__ import annotations
@@ -40,12 +44,12 @@ def test_3dep_elevation_cache_names(tmp_path):
               get_bytes=lambda url: synthetic_tile_bytes())
 
     assert cached_files(tmp_path) == [
-        "dem_553bc22a6bf38fe17f854815ff67ab16.tif",
-        "tiles/dem/12/-348/114.tif",
+        "usgs_3dep/dem_553bc22a6bf38fe17f854815ff67ab16.tif",
+        "usgs_3dep/tiles/dem/12/-348/114.tif",
     ]
     assert [(key, layer) for key, layer, _ in index_rows(tmp_path)] == [
-        ("dem_553bc22a6bf38fe17f854815ff67ab16.tif", "dem-mosaic"),
-        ("tiles/dem/12/-348/114.tif", "dem"),
+        ("usgs_3dep/dem_553bc22a6bf38fe17f854815ff67ab16.tif", "dem-mosaic"),
+        ("usgs_3dep/tiles/dem/12/-348/114.tif", "dem"),
     ]
 
 
@@ -56,12 +60,12 @@ def test_caltopo_wms_cache_names(tmp_path):
                 get_bytes=lambda url: png_bytes(TILE_PX, TILE_PX, (255, 0, 0)))
 
     assert cached_files(tmp_path) == [
-        "sf_1ef363bc6b6d6ad3f85bbbddebdd161a.png",
-        "tiles/wms-sf/12/-348/114.png",
+        "caltopo_wms/sf_1ef363bc6b6d6ad3f85bbbddebdd161a.png",
+        "caltopo_wms/tiles/wms-sf/12/-348/114.png",
     ]
     assert [(key, layer) for key, layer, _ in index_rows(tmp_path)] == [
-        ("sf_1ef363bc6b6d6ad3f85bbbddebdd161a.png", "wms-panel:sf"),
-        ("tiles/wms-sf/12/-348/114.png", "wms:sf"),
+        ("caltopo_wms/sf_1ef363bc6b6d6ad3f85bbbddebdd161a.png", "wms-panel:sf"),
+        ("caltopo_wms/tiles/wms-sf/12/-348/114.png", "wms:sf"),
     ]
 
 
@@ -70,9 +74,9 @@ def test_landfire_vegetation_cache_names(tmp_path):
 
     evt.fetch_tile(-3404, 1120, tmp_path, get_bytes=lambda url: fake_tile_bytes())
 
-    assert cached_files(tmp_path) == ["evt_tile_c-3404_r1120.tif"]
+    assert cached_files(tmp_path) == ["landfire_evt/evt_tile_c-3404_r1120.tif"]
     assert [(key, layer) for key, layer, _ in index_rows(tmp_path)] == [
-        ("evt_tile_c-3404_r1120.tif", "evt")]
+        ("landfire_evt/evt_tile_c-3404_r1120.tif", "evt")]
 
 
 #: sha256 of each tile's Overpass query, and of the four tiles batched. The
@@ -113,7 +117,7 @@ def test_openstreetmap_tile_cache_names(tmp_path):
 
     osm_source.fetch_osm_tiles(tiles, tmp_path, post=post)
 
-    names = [f"osm_tile_v5_c{col}_r{row}.json" for col, row in tiles]
+    names = [f"osm/osm_tile_v5_c{col}_r{row}.json" for col, row in tiles]
     assert cached_files(tmp_path) == sorted(names)
     assert [(key, layer) for key, layer, _ in index_rows(tmp_path)] == [
         (name, "osm") for name in sorted(names)]

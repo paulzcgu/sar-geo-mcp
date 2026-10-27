@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from sar_geo_mcp.sources.dem import tile_path as dem_tile_path
 from sar_geo_mcp.prefetch import (
     ORPHAN_LIMIT_M,
     REQUEST_PIXELS,
@@ -166,7 +167,7 @@ def test_already_cached_tiles_are_counted_not_refetched(tmp_path):
     first = plan.missing_tiles
 
     for tile in plan.layers[0].missing[:2]:
-        path = tmp_path / tile.key("dem", "tif")
+        path = dem_tile_path(tmp_path, tile)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"cached")
 
@@ -196,7 +197,7 @@ def test_the_budget_stops_the_fetch_and_says_so(tmp_path, monkeypatch):
     written = []
 
     def fake_tile(tile, cache_dir, get_bytes=None):
-        path = Path(cache_dir) / tile.key("dem", "tif")
+        path = dem_tile_path(cache_dir, tile)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x" * 1000)
         written.append(tile)
@@ -220,7 +221,7 @@ def test_a_failing_tile_does_not_abandon_the_rest(tmp_path, monkeypatch):
         calls.append(tile)
         if len(calls) == 1:
             raise OSError("connection reset")
-        path = Path(cache_dir) / tile.key("dem", "tif")
+        path = dem_tile_path(cache_dir, tile)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"y" * 10)
         return path
@@ -257,7 +258,7 @@ def test_a_failure_report_never_carries_the_url(tmp_path, monkeypatch):
 
 
 def _stub_tile(cache_dir, tile):
-    path = Path(cache_dir) / tile.key("dem", "tif")
+    path = dem_tile_path(cache_dir, tile)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"z" * 10)
     return path

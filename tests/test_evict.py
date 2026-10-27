@@ -26,6 +26,7 @@ from test_dem import synthetic_tile_bytes
 
 from sar_geo_mcp.cache import CacheIndex
 from sar_geo_mcp.cache.evict import evict, plan_eviction
+from sar_geo_mcp.sources.dem import tile_key as dem_tile_key
 from sar_geo_mcp.staging import panel_dimensions, tiles_in_use
 from sar_geo_mcp.tiles import level_for, tiles_covering
 
@@ -118,7 +119,7 @@ def test_tiles_a_staged_assignment_rests_on_are_protected(cache):
     the middle of a debrief at worst."""
     index = CacheIndex(cache)
     width, height = panel_dimensions(BBOX)
-    needed = [t.key("dem", "tif")
+    needed = [dem_tile_key(t)
               for t in tiles_covering(BBOX, level_for(BBOX, width, height))]
     assert needed, "the fixture bbox covers no tiles"
 
@@ -139,7 +140,7 @@ def test_tiles_in_use_is_derived_from_the_manifest_not_a_stored_list(cache):
     held = tiles_in_use(cache)
 
     width, height = panel_dimensions(BBOX)
-    expected = {t.key("dem", "tif")
+    expected = {dem_tile_key(t)
                 for t in tiles_covering(BBOX, level_for(BBOX, width, height))}
     assert held == expected
 
@@ -217,7 +218,7 @@ def test_a_file_that_vanished_before_eviction_is_not_fatal(cache):
 def dem_keys(bbox=BBOX) -> set[str]:
     """The elevation tiles a directory staged over `bbox` rests on."""
     width, height = panel_dimensions(bbox)
-    return {t.key("dem", "tif")
+    return {dem_tile_key(t)
             for t in tiles_covering(bbox, level_for(bbox, width, height))}
 
 
@@ -493,7 +494,7 @@ def stage_for_real(monkeypatch, cache: Path, radius_m: float,
                                    center_longitude=-122.3164,
                                    radius_m=radius_m, resolution_m=resolution_m)
     fetched = {path.relative_to(cache).as_posix()
-               for path in (cache / "tiles" / "dem").rglob("*.tif")}
+               for path in (cache / "usgs_3dep" / "tiles" / "dem").rglob("*.tif")}
     assert fetched, "staging fetched no elevation tiles"
     return ctx, fetched
 
@@ -559,8 +560,8 @@ def write_old_manifest(cache: Path, name: str, bbox, width_px: int,
 
 
 def levels_of(keys) -> set[int]:
-    """The pyramid levels of `tiles/dem/<level>/<col>/<row>.tif` keys."""
-    return {int(key.split("/")[2]) for key in keys}
+    """The pyramid levels of `usgs_3dep/tiles/dem/<level>/<col>/<row>.tif` keys."""
+    return {int(key.split("/")[-3]) for key in keys}
 
 
 @pytest.mark.parametrize("radius_m, resolution_m", STAGED_GROUNDS)
@@ -619,7 +620,7 @@ def test_an_old_manifest_over_a_tall_extent_holds_the_level_staging_fetched(cach
     write_old_manifest(cache, "aoi-tall", TALL, width_px=width)
 
     held = tiles_in_use(cache)
-    assert {t.key("dem", "tif") for t in tiles_covering(TALL, staged)} <= held
+    assert {dem_tile_key(t) for t in tiles_covering(TALL, staged)} <= held
     # Bounded: at most the level beside it as well, never a sweep of them.
     assert levels_of(held) <= {staged - 1, staged, staged + 1}
     assert len(levels_of(held)) <= 2
@@ -660,7 +661,7 @@ FINE_PX = 2600
 
 def fine_keys() -> set[str]:
     width, height = panel_dimensions(BBOX, max_px=FINE_PX)
-    return {t.key("dem", "tif")
+    return {dem_tile_key(t)
             for t in tiles_covering(BBOX, level_for(BBOX, width, height))}
 
 

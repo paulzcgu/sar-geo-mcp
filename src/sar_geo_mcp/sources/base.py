@@ -208,6 +208,12 @@ class DataSource(ABC):
             raise ValueError(f"{self.info.name} needs a cache directory")
         return self.cache_dir
 
+    def folder(self) -> Path:
+        """This source's own folder under the cache (`cache.layout`)."""
+        from ..cache.layout import source_folder
+
+        return source_folder(self.require_cache(), self.info.name)
+
 
 class RasterSource(DataSource):
     @abstractmethod

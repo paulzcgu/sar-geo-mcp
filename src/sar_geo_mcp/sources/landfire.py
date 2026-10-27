@@ -29,6 +29,7 @@ from ..geo import Bbox
 from .base import Area, RasterResult, RasterSource, SourceInfo
 from .dem import ensure_tiff
 from ..cache import atomic_write_bytes, note_hit, note_write
+from ..cache.layout import source_folder
 
 EVT_EXPORT_URL = (
     "https://edcintl.cr.usgs.gov/arcgis/rest/services/"
@@ -38,6 +39,10 @@ EVT_PIXEL_M = 30.0  # LANDFIRE native resolution
 
 EVT_TILE_PX = 256
 EVT_TILE_M = EVT_PIXEL_M * EVT_TILE_PX  # 7 680 m
+
+#: This source's folder under the cache, and where it wrote before 0.43.0.
+FOLDER = "landfire_evt"
+LEGACY_CACHE = ("evt_tile_*.tif",)
 
 
 @lru_cache(maxsize=1)
@@ -130,7 +135,7 @@ def fetch_tile(
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    destination = cache_dir / f"evt_tile_c{col}_r{row}.tif"
+    destination = source_folder(cache_dir, FOLDER, LEGACY_CACHE) / f"evt_tile_c{col}_r{row}.tif"
     if destination.exists():
         note_hit(cache_dir, destination)
         return destination
@@ -234,7 +239,7 @@ class LandfireEvtSource(RasterSource):
         if out_path is None:
             key = ",".join(f"{value:.0f}" for value in snapped)
             digest = hashlib.sha256(key.encode()).hexdigest()[:32]
-            out_path = cache_dir / f"evt_clip_{digest}.tif"
+            out_path = source_folder(cache_dir, FOLDER, LEGACY_CACHE) / f"evt_clip_{digest}.tif"
         get_bytes = self.transport.get_bytes if self.transport else _http_get
         path = write_evt_clip(area.bbox_3857, Path(out_path), cache_dir, get_bytes=get_bytes)
         with rasterio.open(path) as dataset:

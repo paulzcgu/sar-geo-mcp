@@ -29,6 +29,7 @@ from pathlib import Path
 
 from .cache import atomic_write_text
 from .sources.dem import fetch_dem, read_dem_grid
+from .sources.dem import tile_key as dem_tile_key
 from .sources.landfire import write_evt_clip
 from .terrain.shapes import METRICS_FILENAME
 from .geo import (
@@ -442,7 +443,7 @@ def tiles_in_use(cache_dir: Path) -> set[str]:
         try:
             for level in _staged_dem_levels(manifest, bbox):
                 for tile in tiles_covering(bbox, level):
-                    held.add(tile.key("dem", "tif"))
+                    held.add(dem_tile_key(tile))
         except ValueError:
             continue
     return held

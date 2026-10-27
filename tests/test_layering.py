@@ -55,7 +55,7 @@ ROOT = Path(sar_geo_mcp.__file__).parent
 #: Plumbing with no SAR knowledge. Everything not listed here, and not a
 #: tool layer or the wiring, is domain.
 INFRA = {
-    "net", "net_errors", "config", "cache", "cache.atomic", "cache.index",
+    "net", "net_errors", "config", "cache", "cache.atomic", "cache.index", "cache.layout",
     "cache.evict", "tiles", "geo", "updates",
     "caltopo", "caltopo.session", "caltopo.wms", "caltopo.state", "caltopo.reader",
 }

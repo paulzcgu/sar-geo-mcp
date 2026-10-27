@@ -505,7 +505,7 @@ def test_tile_files_carry_the_query_version_so_old_caches_refetch(tmp_path):
     calls = []
     payload = fetch_osm_tile(-3403, 1122, tmp_path, get_json=lambda q: calls.append(q) or {"elements": []})
     assert payload == {"elements": []}
-    assert (tmp_path / f"osm_tile_v{OSM_QUERY_VERSION}_c-3403_r1122.json").is_file()
+    assert (tmp_path / "osm" / f"osm_tile_v{OSM_QUERY_VERSION}_c-3403_r1122.json").is_file()
     # A v1 file on disk is not read.
     (tmp_path / "osm_tile_c-3403_r1122.json").write_text('{"elements": [1]}', encoding="utf-8")
     fetch_osm_tile(-3403, 1122, tmp_path, get_json=lambda q: calls.append(q) or {"elements": []})
@@ -1303,7 +1303,7 @@ def test_a_successful_fetch_still_writes_the_cache_tile(tmp_path):
 
     payload = fetch_osm_tile(-3403, 1122, tmp_path, get_json=get_json)
 
-    destination = tmp_path / f"osm_tile_v{OSM_QUERY_VERSION}_c-3403_r1122.json"
+    destination = tmp_path / "osm" / f"osm_tile_v{OSM_QUERY_VERSION}_c-3403_r1122.json"
     assert payload == OK_PAYLOAD
     assert json.loads(destination.read_text(encoding="utf-8")) == OK_PAYLOAD
     assert not list(tmp_path.glob("*.part"))

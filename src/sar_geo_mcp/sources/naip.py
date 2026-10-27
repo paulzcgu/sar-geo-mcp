@@ -201,7 +201,7 @@ class UsgsNaipSource(RasterSource):
         if options:
             raise ValueError(f"usgs_naip takes no options; got {sorted(options)}")
         key = hashlib.sha256(",".join(f"{v:.1f}" for v in area.bbox_3857).encode()).hexdigest()[:32]
-        directory = self.require_cache() / key
+        directory = self.folder() / key
         get = None
         if self.transport is not None:
             transport = self.transport

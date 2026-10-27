@@ -15,6 +15,7 @@ import numpy as np
 from ..geo import Bbox
 from .base import Area, RasterResult, RasterSource, SourceInfo
 from ..cache import atomic_output, atomic_write_bytes, note_hit, note_write
+from ..cache.layout import source_folder
 from ..tiles import (
     TILE_PX,
     Tile,
@@ -29,6 +30,10 @@ EXPORT_URL = (
     "3DEPElevation/ImageServer/exportImage"
 )
 MAX_DEM_PIXELS = 8000
+
+#: This source's folder under the cache, and where it wrote before 0.43.0.
+FOLDER = "usgs_3dep"
+LEGACY_CACHE = ("dem_*.tif", "tiles/dem")
 
 TIFF_MAGIC_LE = b"II\x2a\x00"
 TIFF_MAGIC_BE = b"MM\x00\x2a"
@@ -75,11 +80,25 @@ def _http_get(url: str) -> bytes:
     return bytes_with_retry(url)
 
 
+def dem_folder(cache_dir: Path | str) -> Path:
+    """This source's folder under `cache_dir`, older files moved in."""
+    return source_folder(cache_dir, FOLDER, LEGACY_CACHE)
+
+
+def tile_key(tile: Tile) -> str:
+    """One elevation tile's index key: what eviction holds for staged ground."""
+    return f"{FOLDER}/{tile.key('dem', 'tif')}"
+
+
+def tile_path(cache_dir: Path | str, tile: Tile) -> Path:
+    return dem_folder(cache_dir) / tile.key("dem", "tif")
+
+
 def fetch_dem_tile(tile: Tile, cache_dir: Path,
                    get_bytes: Callable[[str], bytes] = _http_get) -> Path:
     """One cached elevation tile, shared by every request that touches it."""
     cache_dir = Path(cache_dir)
-    destination = cache_dir / tile.key("dem", "tif")
+    destination = tile_path(cache_dir, tile)
     if destination.exists():
         note_hit(cache_dir, destination)
         return destination
@@ -132,7 +151,7 @@ def fetch_dem(
     # is no reason to redo the work on every read.
     canonical = f"{','.join(f'{v:.3f}' for v in bbox_3857)}|{width_px}|{height_px}|z{level}"
     key = hashlib.sha256(canonical.encode()).hexdigest()[:32]
-    destination = cache_dir / f"dem_{key}.tif"
+    destination = dem_folder(cache_dir) / f"dem_{key}.tif"
     if destination.exists():
         note_hit(cache_dir, destination)
         return destination

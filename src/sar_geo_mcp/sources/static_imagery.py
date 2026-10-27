@@ -168,8 +168,9 @@ class _StaticSatelliteSource(RasterSource):
         px = max(1, min(int(width_px), MAX_STATIC_PX))
         url, bbox = self._build(x, y, latitude=area.latitude, size_m=size_m, px=px, key=key)
         cache_dir = self.require_cache()
+        folder = self.folder()
         name = self._cache_name(url)
-        existing = [path for path in cache_dir.glob(name + ".*")]
+        existing = [path for path in folder.glob(name + ".*")]
         if existing:
             note_hit(cache_dir, existing[0])
             path = existing[0]
@@ -178,7 +179,7 @@ class _StaticSatelliteSource(RasterSource):
                 data = (self.transport.get_bytes(url) if self.transport else get_static(url))
             except Exception as error:  # noqa: BLE001 - reported by type and status only
                 raise SourceUnavailable.from_error(self.info.name, error) from error
-            path = cache_dir / (name + (".png" if data.startswith(b"\x89PNG") else ".jpg"))
+            path = folder / (name + (".png" if data.startswith(b"\x89PNG") else ".jpg"))
             atomic_write_bytes(path, data)
             note_write(cache_dir, path, layer=self.info.name)
         return RasterResult(path=path, bbox_3857=bbox, width_px=px, height_px=px,

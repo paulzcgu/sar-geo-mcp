@@ -200,7 +200,7 @@ def test_cache_files_are_named_by_tile_not_by_assignment(tmp_path):
     write_evt_clip(BBOX, tmp_path / "a.tif", cache_dir=cache, get_bytes=fake_get)
     write_evt_clip(NEIGHBOUR_BBOX, tmp_path / "b.tif", cache_dir=cache, get_bytes=fake_get)
 
-    cached = list(cache.glob("evt_tile_*.tif"))
+    cached = list((cache / "landfire_evt").glob("evt_tile_*.tif"))
     assert len(cached) == 1
     col, row = tiles_covering(BBOX)[0]
     assert cached[0].name == f"evt_tile_c{col}_r{row}.tif"

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from ..cache import atomic_write_text, note_hit, note_write
+from ..cache.layout import source_folder
 from ..geo import Bbox
 from .base import Area, FeatureResult, FeatureSource, SourceInfo, SourceUnavailable
 
@@ -127,6 +128,11 @@ OSM_TILE_M = 4000.0  # Web Mercator units; ~3.2 km on the ground at 37 N
 #: staging (9,000 m plus the buffer) is five or six tiles a side, so two or
 #: three requests at worst.
 OSM_TILES_PER_QUERY = 16
+
+#: This source's folder under the cache, and where it wrote before 0.43.0
+#: (every query version's tiles: an old one is moved, not read).
+FOLDER = "osm"
+LEGACY_CACHE = ("osm_tile_v*_c*_r*.json",)
 
 #: The `[timeout:]` a one-tile query declares, in seconds.
 OVERPASS_TIMEOUT_S = 60
@@ -559,7 +565,8 @@ def _http_post(query: str, *, client_factory: Callable[[], object] | None = None
 
 
 def _tile_path(cache_dir: Path, col: int, row: int) -> Path:
-    return Path(cache_dir) / f"osm_tile_v{OSM_QUERY_VERSION}_c{col}_r{row}.json"
+    folder = source_folder(cache_dir, FOLDER, LEGACY_CACHE)
+    return folder / f"osm_tile_v{OSM_QUERY_VERSION}_c{col}_r{row}.json"
 
 
 def _refuse_partial(payload: dict, what: str) -> None:
