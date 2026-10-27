@@ -1,6 +1,6 @@
 """Several Overpass tiles in one request (0.22.1).
 
-No network: the batched path's `post` is injected (or `linear._http_post`
+No network: the batched path's `post` is injected (or `osm_source._http_post`
 patched, for the staging path that passes nothing), and tiles are told
 apart by the bbox each tile's statements carry.
 """
@@ -9,21 +9,10 @@ import json
 
 import pytest
 
+from sar_geo_mcp.sources import osm as osm_source
 from sar_geo_mcp.terrain import linear
-from sar_geo_mcp.terrain.linear import (
-    OSM_TILE_MARKER,
-    OverpassUnavailable,
-    _tile_bounds_wgs84,
-    _tile_path,
-    _tile_statements,
-    build_batched_overpass_query,
-    build_overpass_query,
-    fetch_osm_tiles,
-    gates_for,
-    parking_for,
-    routes_for,
-    tiles_covering_osm,
-)
+from sar_geo_mcp.terrain.linear import gates_for, parking_for, routes_for
+from sar_geo_mcp.sources.osm import OSM_TILE_MARKER, OverpassUnavailable, _tile_bounds_wgs84, _tile_path, _tile_statements, build_batched_overpass_query, build_overpass_query, fetch_osm_tiles, tiles_covering_osm
 
 # Two columns by three rows of OSM tiles: the shape of the staging that
 # took 205-214 s on 2026-10-21.
@@ -94,7 +83,7 @@ def test_the_measured_staging_shape_is_six_tiles():
 def test_a_batched_query_is_each_tile_query_behind_its_marker():
     query = build_batched_overpass_query(TILES[:3])
 
-    assert query.startswith(f"[out:json][timeout:{linear.OVERPASS_BATCH_TIMEOUT_S}];")
+    assert query.startswith(f"[out:json][timeout:{osm_source.OVERPASS_BATCH_TIMEOUT_S}];")
     assert query.count("out geom;") == 3
     for col, row in TILES[:3]:
         marker = f"make {OSM_TILE_MARKER} col={col},row={row};out;"
@@ -130,7 +119,7 @@ def test_each_tile_is_cached_as_a_one_tile_fetch_would_cache_it(tmp_path):
     for col, row in TILES:
         batched = _tile_path(tmp_path / "batched", col, row)
         single = _tile_path(tmp_path / "single", col, row)
-        assert batched.name == single.name == f"osm_tile_v{linear.OSM_QUERY_VERSION}_c{col}_r{row}.json"
+        assert batched.name == single.name == f"osm_tile_v{osm_source.OSM_QUERY_VERSION}_c{col}_r{row}.json"
         assert json.loads(batched.read_text()) == json.loads(single.read_text())
 
 
@@ -139,7 +128,7 @@ def test_a_staging_reads_the_same_routes_parking_and_gates_either_way(tmp_path, 
     `_http_post`, and the routes - ids included - are what the one-tile
     path gives for the same ground."""
     fake = FakeOverpass()
-    monkeypatch.setattr(linear, "_http_post", fake)
+    monkeypatch.setattr(osm_source, "_http_post", fake)
 
     routes = routes_for(SIX_TILE_BBOX, tmp_path / "batched")
     parking = parking_for(SIX_TILE_BBOX, tmp_path / "batched")
@@ -205,7 +194,7 @@ def test_batches_are_capped_at_tiles_per_query(tmp_path, size, shapes):
 
 
 def test_the_default_batch_is_sixteen_tiles():
-    assert linear.OSM_TILES_PER_QUERY == 16
+    assert osm_source.OSM_TILES_PER_QUERY == 16
 
 
 def test_a_failed_batch_raises_its_own_error_and_keeps_the_batches_before_it(tmp_path):

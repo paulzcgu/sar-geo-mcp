@@ -1173,7 +1173,7 @@ class TownStaging(FakeStaging):
         from test_populated import elm_street
 
         from sar_geo_mcp.planning.area import build_area
-        from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+        from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
         payload = super().__call__(ctx, **arguments)
         area = build_area(center_latitude=arguments["center_latitude"],

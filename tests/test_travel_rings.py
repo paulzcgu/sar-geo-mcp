@@ -14,7 +14,8 @@ from sar_geo_mcp.planning.travel_rings import (
     LARGEST_RADIUS_M, NO_EVT_WARNING, NO_OSM_WARNING, VOID_ORIGIN_ERROR,
     WATERWAY_KINDS_UNKNOWN_WARNING, _edge_advice, fastest_factor, radius_to_fit, rings_model,
     travel_time_rings)
-from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION, routes_for
+from sar_geo_mcp.terrain.linear import routes_for
+from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
 # Staged ground: 10 m cells, as the rings are staged at (the egress tests' grid).
 ORIGIN = (-13618826.5, 4486605.0)

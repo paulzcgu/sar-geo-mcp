@@ -37,7 +37,7 @@ from sar_geo_mcp.planning.populated import (
     populated_params,
     populated_set,
 )
-from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
 CENTRE = (36.5212, -121.8105)
 SCALE = math.cos(math.radians(CENTRE[0]))

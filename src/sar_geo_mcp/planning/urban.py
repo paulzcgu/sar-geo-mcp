@@ -552,7 +552,7 @@ def _arterials(payload: dict | None) -> tuple[Any, str | None]:
     from shapely.geometry import shape as shapely_shape
     from shapely.ops import unary_union
 
-    from ..terrain.linear import OSM_QUERY_VERSION_ROUTE_TAGS
+    from ..sources.osm import OSM_QUERY_VERSION_ROUTE_TAGS
 
     if payload is None:
         return None, NO_OSM_WARNING

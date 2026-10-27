@@ -123,7 +123,7 @@ from ..planning.populated import populated_areas as populated_areas_impl
 from ..planning.travel_rings import (LARGEST_RADIUS_M, fastest_factor, minutes_list,
                                      radius_to_fit, rings_model)
 from ..planning.walking import NO_EVT_WARNING, NO_OSM_WARNING, WATERWAY_KINDS_UNKNOWN_WARNING
-from ..terrain.linear import OSM_QUERY_VERSION_PARKING
+from ..sources.osm import OSM_QUERY_VERSION_PARKING
 
 OK, FAILED, SKIPPED = "ok", "failed", "skipped"
 #: The section that draws what the others found for CalTopo. Its problems

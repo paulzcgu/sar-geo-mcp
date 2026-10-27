@@ -34,7 +34,7 @@ from sar_geo_mcp.planning.boundary import (
 )
 from sar_geo_mcp.planning.norms import load_norms
 from sar_geo_mcp.terrain.features.base import DEM_VOID_WARNING
-from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 from sar_geo_mcp.geo import M2_PER_ACRE
 
 ORIGIN_X, ORIGIN_Y = -13618826.5, 4486605.0

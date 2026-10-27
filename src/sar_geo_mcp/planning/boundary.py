@@ -66,7 +66,7 @@ from ..terrain.features.base import DEM_VOID_WARNING
 from ..terrain.features.context import TerrainContext
 from ..terrain.grid import project_geometry_to_3857
 from ..terrain.hydro import HYDRO_ASSUMPTIONS, extract_channels, upstream_is_truncated
-from ..terrain.linear import OSM_QUERY_VERSION_BARRIERS, OSM_QUERY_VERSION_MINOR_LINES
+from ..sources.osm import OSM_QUERY_VERSION_BARRIERS, OSM_QUERY_VERSION_MINOR_LINES
 from ..geo import acres
 from .norms import load_norms, norm_flags, resource_median_ha, target_area_range_acres
 

@@ -15,8 +15,8 @@ from pathlib import Path
 import numpy as np
 
 from ..geo import to_wgs84_geojson
-from ..terrain.linear import (OSM_QUERY_VERSION_PARKING, OSM_QUERY_VERSION_ROUTE_TAGS,
-                              SITE_PARKING, WALKABLE_CLASSES)
+from ..sources.osm import OSM_QUERY_VERSION_PARKING, OSM_QUERY_VERSION_ROUTE_TAGS
+from ..terrain.linear import SITE_PARKING, WALKABLE_CLASSES
 from .parking import _nearest_named_way
 
 #: A ROAD with one of these surfaces is a 4x4 exit, not a 2WD one (spec 3.2).

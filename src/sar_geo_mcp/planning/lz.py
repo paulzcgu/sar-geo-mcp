@@ -683,7 +683,7 @@ def _power_lines(payload: dict | None) -> tuple[list[dict] | None, str | None, l
     `kinds_checked` is `["line"]`, and a warning says distribution lines
     were never asked for and ground was staged, and possibly closed,
     without them."""
-    from ..terrain.linear import OSM_QUERY_VERSION_BARRIERS, OSM_QUERY_VERSION_MINOR_LINES
+    from ..sources.osm import OSM_QUERY_VERSION_BARRIERS, OSM_QUERY_VERSION_MINOR_LINES
 
     if payload is None:
         return None, MISSING_OSM_WARNING, []
@@ -1165,7 +1165,7 @@ def lz_candidates(directory, *, center_latitude: float, center_longitude: float,
 
     from ..geo import to_wgs84_geojson
     from ..terrain.grid import load_assignment_grid
-    from ..terrain.linear import OSM_QUERY_VERSION_PARKING, OSM_QUERY_VERSION_ROUTE_TAGS
+    from ..sources.osm import OSM_QUERY_VERSION_PARKING, OSM_QUERY_VERSION_ROUTE_TAGS
     from ..terrain.vegetation import VEGETATION_PROXY_THRESHOLD
     from .parking import _named_ways, _nearest_way_index
 

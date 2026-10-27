@@ -13,6 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from sar_geo_mcp.sources import osm as osm_source
 from sar_geo_mcp.cache import CacheIndex
 from sar_geo_mcp.tiles import TILE_PX
 
@@ -92,25 +93,25 @@ def sha256(text: str) -> str:
 def test_openstreetmap_query_is_unchanged():
     from sar_geo_mcp.terrain import linear
 
-    tiles = linear.tiles_covering_osm(BBOX)
+    tiles = osm_source.tiles_covering_osm(BBOX)
     assert tiles == list(OSM_QUERY_SHA256)
-    assert linear.OSM_QUERY_VERSION == 5
+    assert osm_source.OSM_QUERY_VERSION == 5
     for tile in tiles:
-        assert sha256(linear.build_overpass_query(*tile)) == OSM_QUERY_SHA256[tile], tile
-    assert sha256(linear.build_batched_overpass_query(tiles)) == OSM_BATCH_SHA256
+        assert sha256(osm_source.build_overpass_query(*tile)) == OSM_QUERY_SHA256[tile], tile
+    assert sha256(osm_source.build_batched_overpass_query(tiles)) == OSM_BATCH_SHA256
 
 
 def test_openstreetmap_tile_cache_names(tmp_path):
     from sar_geo_mcp.terrain import linear
 
-    tiles = linear.tiles_covering_osm(BBOX)
+    tiles = osm_source.tiles_covering_osm(BBOX)
 
     def post(query: str) -> dict:
-        return {"elements": [{"type": linear.OSM_TILE_MARKER,
+        return {"elements": [{"type": osm_source.OSM_TILE_MARKER,
                               "tags": {"col": str(col), "row": str(row)}}
                              for col, row in tiles]}
 
-    linear.fetch_osm_tiles(tiles, tmp_path, post=post)
+    osm_source.fetch_osm_tiles(tiles, tmp_path, post=post)
 
     names = [f"osm_tile_v5_c{col}_r{row}.json" for col, row in tiles]
     assert cached_files(tmp_path) == sorted(names)

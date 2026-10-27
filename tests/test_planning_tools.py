@@ -26,7 +26,7 @@ from sar_geo_mcp.planning.lz import (  # noqa: E402
     WATER_EVT_MISSING_WARNING,
 )
 from sar_geo_mcp.server import build_server  # noqa: E402
-from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION  # noqa: E402
+from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION  # noqa: E402
 
 PLS = (37.4022, -122.3164)
 

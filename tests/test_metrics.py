@@ -155,7 +155,7 @@ def test_a_stale_osm_outage_is_not_reported_once_osm_json_is_current(tmp_path):
     re-serves them, so the same stale outage would repeat in every metrics
     document for ground whose `osm.json` has since been fetched whole."""
     from sar_geo_mcp.staging import is_osm_outage_warning
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
     directory = _with_manifest_warnings(
         prepared_dir(tmp_path),

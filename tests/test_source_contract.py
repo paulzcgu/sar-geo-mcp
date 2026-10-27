@@ -92,11 +92,35 @@ def _caltopo_wms(tmp_path: Path):
     return result
 
 
+def _osm(tmp_path: Path):
+    from sar_geo_mcp.sources.osm import OSM_TILE_MARKER, OsmSource, tiles_covering_osm
+
+    latitude, longitude = AREA.center_wgs84
+    tiles = tiles_covering_osm(AREA.bbox_3857)
+    elements = []
+    for col, row in tiles:
+        elements.append({"type": OSM_TILE_MARKER, "tags": {"col": str(col), "row": str(row)}})
+    # Only the first tile's statements carry elements; the rest are empty.
+    elements.insert(1, {"type": "way", "id": 1, "tags": {"highway": "path"},
+                        "geometry": [{"lat": latitude, "lon": longitude},
+                                     {"lat": latitude + 0.001, "lon": longitude}]})
+    elements.insert(2, {"type": "node", "id": 2, "tags": {"barrier": "gate"},
+                        "lat": latitude, "lon": longitude})
+    source = OsmSource(tmp_path, transport=FakeTransport(json_body={"elements": elements}))
+    everything = source.query(AREA)
+    assert {f["properties"]["osm_id"] for f in everything.features} == {1, 2}
+    gates = source.query(AREA, filters={"barrier": ["gate", "lift_gate"]})
+    assert [f["properties"]["osm_id"] for f in gates.features] == [2]
+    assert source.query(AREA, limit=1).truncated is True
+    return everything
+
+
 #: name -> run the source once against a fake network; returns its result.
 FAKE_CALLS: dict[str, Callable[[Path], object]] = {
     "usgs_3dep": _usgs_3dep,
     "landfire_evt": _landfire_evt,
     "caltopo_wms": _caltopo_wms,
+    "osm": _osm,
 }
 
 CLASSES = sources.source_classes()

@@ -791,7 +791,7 @@ def test_a_reused_assignment_ground_still_reports_what_it_lacks(monkeypatch, tmp
     from test_handles import SQUARE as QA103, FakeAssignment, FakeReader
 
     from sar_geo_mcp.staging import osm_outage_warning, write_manifest
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
     evt = "evt unavailable: HTTPStatusError"
     outage = osm_outage_warning("OverpassUnavailable: 504")
@@ -1166,7 +1166,8 @@ def test_the_access_counts_read_the_routes_staging_writes(ctx, monkeypatch, tmp_
     the ways in are the trail's and the road's crossings, not the creek's."""
     from test_boundary import ORIGIN_X, ORIGIN_Y, m
 
-    from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION, routes_for
+    from sar_geo_mcp.terrain.linear import routes_for
+    from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
     def node(x, y):
         lon, lat = m(x, y)

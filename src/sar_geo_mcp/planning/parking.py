@@ -24,7 +24,8 @@ from pathlib import Path
 
 from ..geo import geometry_centroid, ground_meters_per_mercator_unit, to_wgs84_geojson
 from ..terrain.grid import read_subject
-from ..terrain.linear import OSM_QUERY_VERSION_PARKING, SITE_HARDSTAND
+from ..sources.osm import OSM_QUERY_VERSION_PARKING
+from ..terrain.linear import SITE_HARDSTAND
 
 #: Ground-metre ceiling on "nearest named way". A lot's own access road runs
 #: along its edge, and a big lot's centre can be 80 m from the road it opens

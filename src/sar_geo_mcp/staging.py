@@ -178,14 +178,14 @@ def _osm_failure_reason(error: BaseException) -> str:
 
     The one exception is `OverpassUnavailable`, whose message the hub
     writes itself for exactly this reader, from constant phrases, the last
-    status or exception type, and a host name (`linear._host`, which drops
+    status or exception type, and a host name (`sources.osm._host`, which drops
     any credentials in front of it). Reducing it to its class name would
     undo the 2026-09-21 ruling that "osm unavailable: HTTPStatusError" told
     an operator nothing, where "429 Too Many Requests from overpass-api.de"
     tells them every mirror throttled them.
     """
     from .net_errors import safe_reason
-    from .terrain.linear import OverpassUnavailable
+    from .sources.osm import OverpassUnavailable
 
     if isinstance(error, OverpassUnavailable):
         return f"{type(error).__name__}: {error}"
@@ -627,6 +627,7 @@ def stage_terrain(subject, map_id: str, out_dir: Path, *,
 
     osm_failure = None
     try:
+        from .sources import osm
         from .terrain import linear
 
         routes = linear.routes_for(bbox, cache_dir=cache_dir)
@@ -643,7 +644,7 @@ def stage_terrain(subject, map_id: str, out_dir: Path, *,
         # here" from "lots were never asked for".
         (out_dir / "osm.json").write_text(
             json.dumps({"routes": routes, "parking": parking, "gates": gates,
-                        "query_version": linear.OSM_QUERY_VERSION}),
+                        "query_version": osm.OSM_QUERY_VERSION}),
             encoding="utf-8")
     except (RuntimeError, OSError, httpx.HTTPError, ValueError) as error:
         # The reason, not just the class name, when the hub wrote it: "osm
@@ -717,17 +718,17 @@ def _what_an_old_osm_lacks(version: int) -> tuple[str, str, str]:
     unreadable" on a version-3 file would send a planner looking for a
     problem that is not there. The caller may append "until it succeeds",
     so the missing groups come last and the waiting clause is theirs."""
-    from .terrain import linear
+    from .sources import osm
 
     # (first version, noun, while missing, once gained, when held)
     groups = (
-        (linear.OSM_QUERY_VERSION_PARKING, "parking",
+        (osm.OSM_QUERY_VERSION_PARKING, "parking",
          "parking stays unreadable", "parking can now be read", "parking"),
-        (linear.OSM_QUERY_VERSION_MINOR_LINES,
+        (osm.OSM_QUERY_VERSION_MINOR_LINES,
          "distribution power lines (power=minor_line)",
          "distribution power lines (power=minor_line) stay unchecked",
          "distribution power lines (power=minor_line) are checked", "power lines"),
-        (linear.OSM_QUERY_VERSION_ROUTE_TAGS, "road class, access and gates",
+        (osm.OSM_QUERY_VERSION_ROUTE_TAGS, "road class, access and gates",
          "road class, access and gates stay unknown",
          "road class, access and gates can now be read", None),
     )
@@ -756,7 +757,7 @@ def _what_an_old_osm_lacks(version: int) -> tuple[str, str, str]:
 
 def refresh_osm(out_dir: Path, cache_dir: Path) -> list[str]:
     """Top up `osm.json` in an ALREADY-STAGED directory when it is behind
-    `terrain.linear.OSM_QUERY_VERSION`, or missing outright.
+    `sources.osm.OSM_QUERY_VERSION`, or missing outright.
 
     WHY THIS LIVES HERE, NOT IN `planning.area`
     --------------------------------------------
@@ -844,6 +845,7 @@ def refresh_osm(out_dir: Path, cache_dir: Path) -> list[str]:
     """
     import httpx
 
+    from .sources import osm
     from .terrain import linear
 
     out_dir = Path(out_dir)
@@ -865,7 +867,7 @@ def refresh_osm(out_dir: Path, cache_dir: Path) -> list[str]:
             unreadable = True
     had_file = version > 0
 
-    if had_file and version >= linear.OSM_QUERY_VERSION:
+    if had_file and version >= osm.OSM_QUERY_VERSION:
         return []
     staged_before, still_missing, gained = _what_an_old_osm_lacks(version)
     state = ("could not be read (it is not valid JSON)" if unreadable
@@ -891,7 +893,7 @@ def refresh_osm(out_dir: Path, cache_dir: Path) -> list[str]:
         return [f"osm.json {state} but manifest.json has "
                 f"no bbox_3857 to refresh it against, {left}"]
     bbox = tuple(bbox)
-    tiles = len(linear.tiles_covering_osm(bbox))
+    tiles = len(osm.tiles_covering_osm(bbox))
     fetches = f"{tiles} Overpass tile{'s' if tiles != 1 else ''}"
 
     reason = None
@@ -913,7 +915,7 @@ def refresh_osm(out_dir: Path, cache_dir: Path) -> list[str]:
                     "stay unreadable from this ground until it succeeds"]
         if had_file:
             return [f"osm.json is still at query version {version}: refreshing it to "
-                    f"{linear.OSM_QUERY_VERSION} failed ({reason}); "
+                    f"{osm.OSM_QUERY_VERSION} failed ({reason}); "
                     f"{still_missing} until it succeeds"]
         return [f"osm.json is still missing: fetching it failed again "
                 f"({reason}); {_OSM_CARRIES} stay "
@@ -921,12 +923,12 @@ def refresh_osm(out_dir: Path, cache_dir: Path) -> list[str]:
 
     atomic_write_text(osm_path, json.dumps(
         {"routes": routes, "parking": parking, "gates": gates,
-         "query_version": linear.OSM_QUERY_VERSION}))
+         "query_version": osm.OSM_QUERY_VERSION}))
     discard_terrain_metrics(out_dir)
     # See CANDIDATE SETS above: appending, not overwriting, so the file is
     # guaranteed strictly longer and the staleness stamp is guaranteed to
     # change - not merely likely to, on a clock that happened to tick.
-    manifest.setdefault("osm_refreshed_versions", []).append(linear.OSM_QUERY_VERSION)
+    manifest.setdefault("osm_refreshed_versions", []).append(osm.OSM_QUERY_VERSION)
     # The file an outage or kept-file warning spoke of has just been
     # replaced by a whole, current one, so those warnings are retired
     # rather than repeated to every later caller. MOVED to a list that only
@@ -941,13 +943,13 @@ def refresh_osm(out_dir: Path, cache_dir: Path) -> list[str]:
         manifest["warnings"] = [w for w in manifest["warnings"]
                                 if not _retires_on_top_up(w)]
         manifest.setdefault("osm_retired_warnings", []).extend(
-            {"warning": w, "retired_by_query_version": linear.OSM_QUERY_VERSION}
+            {"warning": w, "retired_by_query_version": osm.OSM_QUERY_VERSION}
             for w in retired)
     atomic_write_text(manifest_path, json.dumps(manifest, indent=2))
 
     if had_file:
         return [f"osm.json was staged at query version {version}, {staged_before}; "
-                f"topped it up to {linear.OSM_QUERY_VERSION} over {fetches} so "
+                f"topped it up to {osm.OSM_QUERY_VERSION} over {fetches} so "
                 f"{gained}"]
     if unreadable:
         return [f"osm.json could not be read (it is not valid JSON); fetched it again "

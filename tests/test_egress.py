@@ -17,7 +17,7 @@ from sar_geo_mcp.planning.egress_graph import (MODES, build_graph, signed_tobler
 from sar_geo_mcp.planning.egress_roads import NO_OSM_ERROR
 from sar_geo_mcp.planning.walking import NO_EVT_WARNING
 from sar_geo_mcp.terrain.grid import load_assignment_grid
-from sar_geo_mcp.terrain.linear import OSM_QUERY_VERSION
+from sar_geo_mcp.sources.osm import OSM_QUERY_VERSION
 
 # Staged ground for the entry-point tests: 10 m cells, as egress stages at.
 ORIGIN = (-13618826.5, 4486605.0)

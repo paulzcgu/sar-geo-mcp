@@ -578,7 +578,7 @@ def osm_helipads_near(points: list[tuple[float, float]], radius_m: float = HELIP
     if not points:
         return []
     if post is None:
-        from ..terrain.linear import _http_post as post
+        from ..sources.osm import _http_post as post
     clauses = "".join(
         f'nwr(around:{radius_m:.0f},{lat:.6f},{lon:.6f})[aeroway~"^(helipad|heliport)$"];'
         for lat, lon in points)
@@ -772,8 +772,8 @@ def _markers(latitude: float, longitude: float, rows: list[dict],
 
 def _assumptions(helicopter_speed_kmh: float, air_overhead_minutes: float) -> dict[str, Any]:
     # Hosts only, never a full URL: an override may carry a key or userinfo.
-    from ..terrain.linear import _host as host
-    from ..terrain.linear import reported_endpoints
+    from ..sources.osm import _host as host
+    from ..sources.osm import reported_endpoints
 
     return {
         "hospitals": {
