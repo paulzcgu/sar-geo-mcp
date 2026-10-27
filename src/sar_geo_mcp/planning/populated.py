@@ -106,7 +106,7 @@ from typing import Any
 
 import numpy as np
 
-from ..geo import geometry_centroid, ground_meters_per_mercator_unit, to_wgs84_geojson
+from ..geo import acres, geometry_centroid, ground_meters_per_mercator_unit, to_wgs84_geojson
 from ..net_errors import safe_reason
 from ..terrain.grid import read_subject
 
@@ -1268,7 +1268,7 @@ def _populated_areas(directory, *, margin_m: float, pixel_m: float = 1.0,
             "parcels": int(built[members].sum()),
             "vacant_lots": int((~built[members]).sum()),
             "buildings": int(buildings_per_block[number]),
-            "area_ha": round(polygon.area * scale * scale / 10_000, 3),
+            "area_acres": round(acres(polygon.area * scale * scale), 2),
             "median_parcel_m2": round(float(np.median(lot_areas)), 0),
             "roof_cover_pct": round(100 * float(roof_m2[members].sum() / lot_areas.sum()), 1),
             "point": {"latitude": latitude, "longitude": longitude},

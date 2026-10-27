@@ -1170,7 +1170,7 @@ def test_a_section_calling_two_features_takes_its_overrides_by_tool():
 
 @pytest.mark.parametrize("tool, keyword", [
     ("populated_areas", "handle"), ("populated_areas", "building_markers"),
-    ("urban_assignments", "handle"), ("urban_assignments", "target_ha"),
+    ("urban_assignments", "handle"), ("urban_assignments", "target_acres"),
     ("urban_assignments", "resource_type"), ("urban_assignments", "building_markers")])
 def test_a_keyword_the_urban_helper_always_sets_is_refused_without_the_scenario_naming_it(
         tool, keyword):
@@ -1250,13 +1250,13 @@ def test_the_grouping_s_block_rules_are_the_domain_function_s_defaults():
 
 @pytest.mark.parametrize("value", [None, 0.5, 10, 25.0])
 def test_a_target_size_is_none_or_above_zero(value):
-    _sections.check_target_ha(value)
+    _sections.check_target_acres(value)
 
 
 @pytest.mark.parametrize("value", [0, -1.0, float("nan"), float("inf"), True, "10"])
 def test_a_target_size_that_is_not_one_is_refused(value):
-    with pytest.raises(ValueError, match="target_ha must be a number of hectares above zero"):
-        _sections.check_target_ha(value)
+    with pytest.raises(ValueError, match="target_acres must be a number of acres above zero"):
+        _sections.check_target_acres(value)
 
 
 # --- Staging -----------------------------------------------------------------

@@ -27,7 +27,7 @@ def _candidate(index, geometry, *, name="Elm Street", facts=None, markers=None,
     return {"id": f"{set_id}.{index}", "kind": "assignment", "axis": "urban",
             "axis_ids": [], "sources": [], "name": name, "geometry": mapping(geometry),
             "facts": facts or {"streets": ["Elm Street"], "parcels": 12, "buildings": 10,
-                               "area_ha": 1.2, "distance_from_center_m": 150.0,
+                               "area_acres": 1.2, "distance_from_center_m": 150.0,
                                "bearing_from_center_deg": 90.0},
             "norm_flags": [], "warnings": [], "markers": markers}
 

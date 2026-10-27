@@ -10,6 +10,7 @@ import pytest
 from shapely.geometry import LineString, Point, Polygon, box, mapping, shape
 from shapely.ops import unary_union
 
+from sar_geo_mcp.geo import HA_PER_ACRE
 from sar_geo_mcp.planning.urban import (
     NO_ARTERIALS_WARNING,
     group_blocks,
@@ -22,6 +23,9 @@ from sar_geo_mcp.planning.urban import (
 
 # Ground metres per map unit of 1: the squares below are drawn in metres.
 SCALE = 1.0
+#: A 2 ha target, as the tools take it: in acres. The grouping works in
+#: hectares, so this is exactly the 2 ha the town below was drawn for.
+TWO_HA = 2.0 / HA_PER_ACRE
 
 
 def _row(count, *, size=100.0, gap=20.0, y=0.0):
@@ -367,8 +371,8 @@ def test_the_default_target_is_the_corpus_median_for_the_resource():
 
 
 def test_urban_assignments_merge_the_towns_blocks(tmp_path):
-    result = _run(tmp_path, target_ha=2.0)
-    assert result["assumptions"]["grouping"]["target_ha"] == 2.0
+    result = _run(tmp_path, target_acres=TWO_HA)
+    assert result["assumptions"]["grouping"]["target_acres"] == 4.9
     assert result["assumptions"]["grouping"]["target_source"] == "given"
     (assignment,) = result["assignments"]              # the street and the apartments
     facts = assignment["facts"]
@@ -381,18 +385,18 @@ def test_urban_assignments_merge_the_towns_blocks(tmp_path):
 def test_urban_assignments_default_to_the_ground_norm(tmp_path):
     result = _run(tmp_path)
     grouping = result["assumptions"]["grouping"]
-    assert grouping["target_ha"] == 10.0
+    assert grouping["target_acres"] == 24.7
     assert grouping["target_source"] == "corpus median for GROUND"
 
 
 def test_arterials_unknown_on_old_ground_is_said(tmp_path):
-    result = _run(tmp_path, target_ha=2.0, query_version=4)
+    result = _run(tmp_path, target_acres=TWO_HA, query_version=4)
     assert NO_ARTERIALS_WARNING.format(version=4) in result["warnings"]
     assert result["assumptions"]["grouping"]["arterials"] == "unknown"
 
 
 def test_markers_travel_with_the_group(tmp_path):
-    result = _run(tmp_path, target_ha=2.0, building_markers=True)
+    result = _run(tmp_path, target_acres=TWO_HA, building_markers=True)
     (assignment,) = result["assignments"]
     assert len(assignment["markers"]) == 16 == assignment["facts"]["markers"]
     assert result["summary"]["markers"] == 16
@@ -403,8 +407,8 @@ def test_the_urban_set_holds_assignment_candidates(tmp_path):
 
     directory = _town_dir(tmp_path)
     parcels, roofs = town()
-    params = urban_params(target_ha=2.0, resource_type="ground", max_distance_m=None)
-    assert params == {"method": 4, "target_ha": 2.0, "resource_type": "GROUND",
+    params = urban_params(target_acres=TWO_HA, resource_type="ground", max_distance_m=None)
+    assert params == {"method": 4, "target_acres": TWO_HA, "resource_type": "GROUND",
                       "max_distance_m": None}
     cset = urban_set(directory, params, handle="aoi-test", norms=None, wms_base_url=WMS,
                      cache_dir=tmp_path / "cache", fetch=fake_fetch(parcels, roofs))
@@ -426,15 +430,15 @@ def test_a_target_left_to_the_norms_puts_them_in_the_set_id(tmp_path):
     agency = load_norms()
     agency["area_ha_by_resource"]["medians"]["GROUND"] = 1.0
 
-    def set_id(target_ha, norms):
-        return make_set_id("urban", urban_params(target_ha=target_ha, resource_type="GROUND",
+    def set_id(target_acres, norms):
+        return make_set_id("urban", urban_params(target_acres=target_acres, resource_type="GROUND",
                                                  max_distance_m=None, norms=norms))
 
     assert set_id(None, None) == set_id(None, load_norms())
     assert set_id(None, agency) != set_id(None, None)
     assert set_id(2.0, agency) == set_id(2.0, None)
     with pytest.raises(ValueError, match="made under norms"):
-        urban_set(tmp_path, urban_params(target_ha=None, resource_type="GROUND",
+        urban_set(tmp_path, urban_params(target_acres=None, resource_type="GROUND",
                                          max_distance_m=None, norms=agency),
                   handle="aoi-test", norms=None, wms_base_url=None, cache_dir=None)
 
@@ -503,7 +507,7 @@ def test_every_house_is_counted_once_in_the_assignment_drawn_round_it(
     blocks, no assignment is a sliver of no area carrying houses, and every
     house marker lies inside its own assignment's polygon and no other's."""
     blocks = _fake_blocks(monkeypatch, layout)
-    result = urban_assignments(tmp_path, target_ha=2.0, building_markers=True)
+    result = urban_assignments(tmp_path, target_acres=TWO_HA, building_markers=True)
     assignments = result["assignments"]
 
     assert sorted(name for a in assignments for name in a["blocks"]) == sorted(
@@ -515,7 +519,7 @@ def test_every_house_is_counted_once_in_the_assignment_drawn_round_it(
     assert summary["markers"] == sum(len(block["markers"]) for block in blocks)
     for assignment in assignments:
         polygon = shape(assignment["geometry"])
-        assert assignment["facts"]["area_ha"] > 0, assignment["name"]
+        assert assignment["facts"]["area_acres"] > 0, assignment["name"]
         outside = [marker["properties"]["title"] for marker in assignment["markers"]
                    if not polygon.contains(shape(marker["geometry"]))]
         assert outside == [], f"{assignment['name']} counts houses outside it"
@@ -532,7 +536,7 @@ def test_blocks_hemmed_two_deep_are_counted_in_the_assignment_drawn_round_them(
     their streets, blocks, parcels, buildings and markers in its facts, and
     no assignment of their own."""
     _fake_blocks(monkeypatch, TOWN_TWO_DEEP)
-    result = urban_assignments(tmp_path, target_ha=2.0, building_markers=True)
+    result = urban_assignments(tmp_path, target_acres=TWO_HA, building_markers=True)
     (assignment,) = result["assignments"]
     assert assignment["name"] == "Oak Street +2"
     assert assignment["blocks"] == ["Oak Street", "Elm Court", "Ash Lane"]
@@ -541,9 +545,9 @@ def test_blocks_hemmed_two_deep_are_counted_in_the_assignment_drawn_round_them(
     assert (facts["blocks"], facts["parcels"], facts["buildings"], facts["markers"]) == (
         3, 71, 64, 64)
     assert len(assignment["markers"]) == 64
-    assert facts["area_ha"] == pytest.approx(4.0, abs=0.01) and facts["parts"] == 1
+    assert facts["area_acres"] == pytest.approx(4.0 / HA_PER_ACRE, abs=0.02) and facts["parts"] == 1
     assert result["summary"]["count"] == 1
-    assert result["summary"]["area_ha"]["min"] == facts["area_ha"]
+    assert result["summary"]["area_acres"]["min"] == facts["area_acres"]
 
 
 def test_a_hemmed_water_pair_inside_the_host_warns_of_no_water(monkeypatch, tmp_path):
@@ -553,7 +557,7 @@ def test_a_hemmed_water_pair_inside_the_host_warns_of_no_water(monkeypatch, tmp_
     _fake_blocks(monkeypatch, [("Oak Street", TWO_COURTYARDS[0], 60, 55),
                                ("Elm Court", TWO_COURTYARDS[1], 4, 4),
                                ("Ash Court", TWO_COURTYARDS[2], 4, 4)])
-    result = urban_assignments(tmp_path, target_ha=2.0)
+    result = urban_assignments(tmp_path, target_acres=TWO_HA)
     (assignment,) = result["assignments"]
     assert assignment["facts"]["water_links"] == 0
     # Oak Street alone is past the 2.8 ha ceiling: the courts did not carry it.
@@ -571,12 +575,12 @@ def test_a_hemmed_join_past_the_ceiling_is_said(monkeypatch, tmp_path):
     the assignment past the ceiling, its warnings name the block."""
     _fake_blocks(monkeypatch, [("Oak Street", SLOTTED_SMALL, 40, 40),
                                ("Elm Court", box(78, 71, 177, 89), 5, 5)])
-    result = urban_assignments(tmp_path, target_ha=2.0)
+    result = urban_assignments(tmp_path, target_acres=TWO_HA)
     (assignment,) = result["assignments"]
     assert assignment["blocks"] == ["Oak Street", "Elm Court"]
     (warning,) = assignment["warnings"]
     assert warning.startswith("Elm Court, most of whose ground lies inside this assignment's")
-    assert "2.83 ha, past the 2.80 ha (140 % of the target)" in warning
+    assert "7.0 acres, past the 6.9 acres (140 % of the target)" in warning   # 2.83 ha, 2.8 ha
 
 
 def test_neighbours_across_a_street_are_snapped_to_one_shared_edge():

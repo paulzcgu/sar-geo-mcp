@@ -7,7 +7,12 @@ against; a table with no p90 (the boundary on_feature_pct figures top out
 at p75) only ever flags "below", since there is no honest upper band to
 flag against. Where a resource type is named and the corpus has a median
 for it, area is banded against that resource rather than against a corpus
-whose middle is a ground team's 10 ha. A server for another agency replaces
+whose middle is a ground team's 25 acres.
+
+The file keeps its areas in hectares (`polygon_area_ha`,
+`area_ha_by_resource`), as the corpus was measured and as another agency's
+file is written; every answer gives them in acres (`target_area_range_acres`,
+`norms_in_acres`, an `area_acres` flag). A server for another agency replaces
 the file (`--norms`, `ZA_ASSIGNMENT_NORMS`); a caller overrides a target per
 call and the override wins. A candidate set the norms decide is made afresh
 under another file rather than read back from the cache (`norms_digest`).
@@ -15,9 +20,12 @@ under another file rather than read back from the cache (`norms_digest`).
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
+
+from ..geo import HA_PER_ACRE
 
 DEFAULT_NORMS_PATH = Path(__file__).parent / "data" / "assignment_norms.json"
 
@@ -26,12 +34,14 @@ CORPUS_BAND = "corpus p10-p90"
 CORPUS_LOW_ONLY_BAND = "corpus p10 (the corpus has no p90 for this metric)"
 RESOURCE_BAND = "resource p25-p75 (ratio-derived from the resource median)"
 
-#: metric name in `facts` -> (dotted path to its percentile table, a label).
+#: metric name in `facts` -> (dotted path to its percentile table, a label,
+#: what one unit of the table is in the metric's unit).
 _BANDED = {
-    "area_ha": ("polygon_area_ha", "polygon area"),
-    "on_feature_pct": ("boundary.on_feature_pct", "share of boundary on a mapped feature"),
-    "width_m": ("corridor_width_m", "corridor width"),
-    "length_m": ("line_length_m", "line length"),
+    "area_acres": ("polygon_area_ha", "polygon area (acres)", 1.0 / HA_PER_ACRE),
+    "on_feature_pct": ("boundary.on_feature_pct", "share of boundary on a mapped feature",
+                       1.0),
+    "width_m": ("corridor_width_m", "corridor width", 1.0),
+    "length_m": ("line_length_m", "line length", 1.0),
 }
 
 
@@ -101,10 +111,36 @@ def target_area_range_ha(resource_type: str, norms: dict) -> dict:
             "source": "polygon_area_ha"}
 
 
+def target_area_range_acres(resource_type: str, norms: dict) -> dict:
+    """`target_area_range_ha` in acres, to one decimal place."""
+    spread = target_area_range_ha(resource_type, norms)
+    return {**{k: round(spread[k] / HA_PER_ACRE, 1) for k in ("p25", "p50", "p75")},
+            "source": spread["source"]}
+
+
+def norms_in_acres(norms: dict) -> dict:
+    """A copy of `norms` with its hectare tables given in acres, to one
+    decimal place: `polygon_area_ha` as `polygon_area_acres`, and
+    `area_ha_by_resource` as `area_acres_by_resource` (its ratios, which have
+    no unit, unchanged). Every other table is as the file has it."""
+    shown = copy.deepcopy(norms)
+    table = shown.pop("polygon_area_ha", None)
+    if isinstance(table, dict):
+        shown["polygon_area_acres"] = {k: round(float(v) / HA_PER_ACRE, 1)
+                                       for k, v in table.items()}
+    by_resource = shown.pop("area_ha_by_resource", None)
+    if isinstance(by_resource, dict):
+        by_resource = dict(by_resource)
+        by_resource["medians"] = {k: round(float(v) / HA_PER_ACRE, 1)
+                                  for k, v in (by_resource.get("medians") or {}).items()}
+        shown["area_acres_by_resource"] = by_resource
+    return shown
+
+
 def norm_flags(facts: dict, norms: dict, resource_type: str = "") -> list[dict]:
     """Departures from the band that applies, one entry per metric.
 
-    `facts` holds any of `area_ha`, `on_feature_pct`, `width_m`, `length_m`;
+    `facts` holds any of `area_acres`, `on_feature_pct`, `width_m`, `length_m`;
     absent or null values are skipped. The caller decides which apply (a
     line has a length, a corridor a width) by what it puts in `facts`.
 
@@ -114,33 +150,34 @@ def norm_flags(facts: dict, norms: dict, resource_type: str = "") -> list[dict]:
     honestly compare "too high" against.
 
     `resource_type` names the resource the target would be assigned to. When
-    the corpus has a median for it, `area_ha` is banded against THAT
-    resource's p25-p75 range rather than the whole corpus: a 0.9 ha dog trail
-    assignment is ordinary for a resource whose median is 0.7 ha, and reading
-    it against a corpus dominated by 10 ha ground teams reported it as too
-    small. Only area is banded this way; the corpus has no per-resource
-    width, length or on-feature figures, so those stay against the whole
-    corpus. Every flag says which band it used, in `band` and in the note.
+    the corpus has a median for it, `area_acres` is banded against THAT
+    resource's p25-p75 range rather than the whole corpus: a 2-acre dog
+    trail assignment is ordinary for a resource whose median is 1.7 acres,
+    and reading it against a corpus dominated by 25-acre ground teams
+    reported it as too small. The bands are the corpus's hectares in acres.
+    Only area is banded this way; the corpus has no per-resource width,
+    length or on-feature figures, so those stay against the whole corpus. Every flag says which band it used, in `band` and in the note.
     """
     flags: list[dict] = []
     resource_key = (resource_type or "").strip().upper()
     resource_median = resource_median_ha(resource_key, norms)
-    for metric, (table_name, label) in _BANDED.items():
+    for metric, (table_name, label, unit) in _BANDED.items():
         value = facts.get(metric)
         if value is None:
             continue
         value = float(value)
-        if metric == "area_ha" and resource_median is not None:
+        if metric == "area_acres" and resource_median is not None:
             spread = target_area_range_ha(resource_key, norms)
-            low, mid, high = float(spread["p25"]), spread["p50"], float(spread["p75"])
+            low, mid, high = (float(spread["p25"]) * unit, float(spread["p50"]) * unit,
+                              float(spread["p75"]) * unit)
             band, band_label = RESOURCE_BAND, f"{resource_key} p25-p75"
         else:
             table = _table(norms, table_name)
             if not table or "p10" not in table:
                 continue
-            low = float(table["p10"])
-            mid = table.get("p50")
-            high = float(table["p90"]) if "p90" in table else None
+            low = float(table["p10"]) * unit
+            mid = float(table["p50"]) * unit if table.get("p50") is not None else None
+            high = float(table["p90"]) * unit if "p90" in table else None
             band = CORPUS_BAND if high is not None else CORPUS_LOW_ONLY_BAND
             band_label = "corpus p10-p90"
         direction = None
@@ -150,6 +187,8 @@ def norm_flags(facts: dict, norms: dict, resource_type: str = "") -> list[dict]:
             direction = "above"
         if direction is None:
             continue
+        low, high = round(low, 1), (round(high, 1) if high is not None else None)
+        mid = round(mid, 1) if mid is not None else None
         where = (f"below the corpus p10 ({low:g})" if high is None
                  else f"{direction} the {band_label} band ({low:g} to {high:g})")
         flags.append({

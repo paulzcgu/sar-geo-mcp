@@ -1205,7 +1205,20 @@ name = "sar-geo-mcp"
 # back. A call that has to read wider takes longer: half a mile across, 14
 # to 32 s in four towns (a bayside suburb, a lagoon town, a hillside town
 # and a lakeside one) rather than about 6.
-version = "0.40.0"
+# 0.41.0: areas are in acres.
+# WHAT WAS WRONG: every area came back in hectares, a unit search planners
+# in the US do not work in. WHAT CHANGED: every area a tool answers is in
+# acres, and the names say so - `area_acres` (urban blocks and assignments,
+# describe_boundary, hasty corridors, travel-time rings, buffer_geometry),
+# `target_acres` (urban_assignments, plan_urban_search), and
+# assignment_norms' `target_area_acres`, `polygon_area_acres` and
+# `area_acres_by_resource`; an area norm flag is `area_acres`, banded in
+# acres, and CalTopo descriptions say acres. The old names are gone: a
+# script or override passing `target_ha` must pass `target_acres`. The
+# corpus file keeps its hectares, so another agency's file is written as
+# before, and is converted where an answer is written. Urban sets are named
+# by `target_acres` now, so each is made once afresh.
+version = "0.41.0"
 description = "CalTopo interaction hub and geo-computing accessories for SAR"
 license = "MIT"
 license-files = ["LICENSE"]

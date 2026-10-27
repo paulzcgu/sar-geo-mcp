@@ -52,5 +52,5 @@ def test_live_travel_time_rings_at_windy_hill(tmp_path):
         assert not _mentions_a_path(warning, cache_root), warning
 
     for ring in rings:
-        print(ring["minutes"], ring["area_ha"], ring["equivalent_radius_m"],
+        print(ring["minutes"], ring["area_acres"], ring["equivalent_radius_m"],
               ring["reach_by_direction_m"])

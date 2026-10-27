@@ -120,6 +120,19 @@ def bbox_center_wgs84(bbox_3857: Bbox) -> tuple[float, float]:
     return latitude, longitude
 
 
+#: Square metres in one international acre. Areas are given in acres, the
+#: unit a search planner works in; the corpus and the grouping keep their
+#: own figures and are converted where an answer is written.
+M2_PER_ACRE = 4046.8564224
+#: Hectares in one acre, for converting the corpus's hectare tables.
+HA_PER_ACRE = M2_PER_ACRE / 10_000.0
+
+
+def acres(area_m2: float) -> float:
+    """`area_m2` square metres in acres."""
+    return area_m2 / M2_PER_ACRE
+
+
 def ground_meters_per_mercator_unit(latitude_deg: float) -> float:
     """Web Mercator units are inflated by 1/cos(latitude); this is the inverse.
 
@@ -453,7 +466,7 @@ def _cut_holes_open(polygon):
 
     CalTopo keeps one ring per polygon. Handed a ribbon round a closed way
     it drops the hole and fills the middle, so a 1,698 m loop trail
-    imported as an 8.4 ha area of hillside instead of a 4.9 ha corridor.
+    imported as a 21-acre area of hillside instead of a 12-acre corridor.
     Cut open, the same ribbon arrives as the ribbon.
 
     The bridge adds no area, and the hole is walked the opposite way round
@@ -549,11 +562,11 @@ def buffer_geometry_wgs84(geometry: dict, distance_m: float, *,
     `single_ring` draws a result that encloses ground as ONE ring per
     polygon, each hole cut open along a zero-width bridge, because CalTopo
     carries one ring and otherwise fills the middle of a loop. The ground
-    covered and `area_ha` are the same either way; only the drawing
+    covered and `area_acres` are the same either way; only the drawing
     changes. See `_cut_holes_open`.
 
     Returns `geometry`, `distance_m`, `width_m` (twice the distance) and
-    `area_ha` of the result in ground hectares.
+    `area_acres` of the result in ground acres.
     """
     kind = geometry.get("type") if isinstance(geometry, dict) else type(geometry).__name__
     if kind not in _BUFFERABLE:
@@ -597,7 +610,7 @@ def buffer_geometry_wgs84(geometry: dict, distance_m: float, *,
     latitude = parsed.centroid.y
     scale = 1.0 / math.cos(math.radians(latitude))
     buffered = transform(_TO_3857.transform, parsed).buffer(distance * scale)
-    area_ha = buffered.area / (scale * scale) / 1e4
+    area_m2 = buffered.area / (scale * scale)
     back = transform(_TO_4326.transform, buffered)
     # After the area, and after the return to WGS84: the cut is a drawing
     # decision, so it must not touch what the ribbon measures, and the
@@ -610,7 +623,7 @@ def buffer_geometry_wgs84(geometry: dict, distance_m: float, *,
         "geometry": json.loads(json.dumps(mapping(back))),
         "distance_m": distance,
         "width_m": 2.0 * distance,
-        "area_ha": round(area_ha, 2),
+        "area_acres": round(acres(area_m2), 2),
     }
 
 

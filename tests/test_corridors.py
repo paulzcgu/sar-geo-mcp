@@ -13,6 +13,7 @@ from sar_geo_mcp.planning.boundary import load_ground
 from sar_geo_mcp.planning.candidates import Candidate, CandidateSet
 from sar_geo_mcp.planning.corridors import ALL_INCLUDE, DEFAULT_INCLUDE, hasty_candidates
 from sar_geo_mcp.planning.norms import load_norms
+from sar_geo_mcp.geo import M2_PER_ACRE
 
 
 def area_subject(data_dir, center_units=(200, 200), radius_units=150):
@@ -379,7 +380,7 @@ def test_a_waterway_becomes_a_corridor_of_the_norms_width(tmp_path):
     assert corridor.axis_ids == ["route_c"]
     assert corridor.facts["width_m"] == 30.0
     assert corridor.geometry["type"] == "Polygon"
-    assert corridor.facts["area_ha"] == pytest.approx(corridor.facts["length_m"] * 30.0 / 1e4, rel=0.15)
+    assert corridor.facts["area_acres"] == pytest.approx(corridor.facts["length_m"] * 30.0 / M2_PER_ACRE, rel=0.15)
 
 
 def test_drainages_and_ridges_are_not_offered(tmp_path):
@@ -928,7 +929,7 @@ def test_facts_are_rounded_to_what_the_measurement_supports(tmp_path):
     assert places(facts["nearest_point"]["longitude"]) <= 6
     assert places(facts["effort"]["hours_one_way"]) <= 3
     corridor = generate(data_dir, include=["waterway"]).candidates[0].facts
-    assert places(corridor["area_ha"]) <= 3
+    assert places(corridor["area_acres"]) <= 2
 
 
 def test_limit_keeps_the_first_candidates_and_says_how_many_there_were(tmp_path):

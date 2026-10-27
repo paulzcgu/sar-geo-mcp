@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 import numpy as np
 from pyproj import Transformer
 
-from ..geo import to_wgs84_geojson
+from ..geo import acres, to_wgs84_geojson
 from ..terrain.grid import CORRIDOR_HALF_WIDTH_M, project_geometry_to_3857
 from .boundary import EDGE_WARNINGS, Ground
 from .candidates import Candidate, CandidateSet, candidate_id, make_set_id
@@ -139,7 +139,7 @@ _PLACES_BY_WORD: dict[str, int] = {"hours": 3, "minutes": 1}
 #: A name that ENDS in the unit. Longest suffix first: `area_m2` is metres
 #: squared, not metres.
 _PLACES_BY_SUFFIX: tuple[tuple[str, int], ...] = (
-    ("_pct", 1), ("_ha", 3), ("_deg", 1), ("_kmh", 2), ("_m2", 1), ("_m", 1),
+    ("_pct", 1), ("_acres", 2), ("_deg", 1), ("_kmh", 2), ("_m2", 1), ("_m", 1),
 )
 
 
@@ -881,7 +881,7 @@ def _facts(ground: Ground, entry: dict, geometry_3857, kind: str, centre, existi
     })
     if kind == "corridor":
         facts["width_m"] = float(widths[entry["cls"]])
-        facts["area_ha"] = geometry_3857.area * scale * scale / 1e4
+        facts["area_acres"] = acres(geometry_3857.area * scale * scale)
     # The density class and the traverse table are the same for every
     # candidate; the set states them once. A line's assumptions are ALL of
     # that kind, so it points at the set's copy rather than carrying `{}`,

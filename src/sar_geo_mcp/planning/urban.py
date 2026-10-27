@@ -4,12 +4,14 @@ size, the way a planner groups streets for a team.
 WHY GROUP
 ---------
 `populated_areas` draws one block per street run. In a dense suburb that is
-sixty blocks inside half a mile, from a 0.2 ha cul-de-sac to an 11 ha office
-park - not sixty assignments. A team is handed ground of roughly one size;
-this module merges neighbouring blocks into groups of about `target_ha`. The
-target defaults to the corpus median for the resource type
-(`norms.target_area_range_ha`, 10 ha for GROUND); the bayside-suburb test liked
-11.7 ha, the size of its largest single block. A type the corpus has no
+sixty blocks inside half a mile, from a half-acre cul-de-sac to a 27-acre
+office park - not sixty assignments. A team is handed ground of roughly one
+size; this module merges neighbouring blocks into groups of about
+`target_acres`. The target defaults to the corpus median for the resource type
+(`norms.target_area_range_ha`, 25 acres for GROUND); the bayside-suburb test
+liked 29 acres, the size of its largest single block. Areas are given in
+acres; the grouping itself works in hectares, the corpus's unit, and is
+converted where an answer is written. A type the corpus has no
 median for is sized by the median of every assignment, and the grouping's
 `target_source` and a warning say so: a typo must not read as a median.
 
@@ -69,7 +71,7 @@ split down its middle, every point going to the nearer, so the two share
 one edge, vertex for vertex, with no gap and no overlap. Only ground
 between two assignments is taken: an outer edge facing ground no other
 assignment is near stays at its back fences. Nothing a block holds moves,
-so the counts still describe the ground drawn; `area_ha` includes the
+so the counts still describe the ground drawn; `area_acres` includes the
 street ground each assignment took.
 
 A group ignores the search circle: it holds whole blocks, and a block the
@@ -86,7 +88,7 @@ from typing import Any
 
 import numpy as np
 
-from ..geo import ground_meters_per_mercator_unit, to_wgs84_geojson
+from ..geo import HA_PER_ACRE, acres, ground_meters_per_mercator_unit, to_wgs84_geojson
 
 #: OpenStreetMap road classes a group never crosses.
 ARTERIALS = frozenset({"motorway", "motorway_link", "trunk", "trunk_link", "primary",
@@ -790,7 +792,7 @@ def group_blocks(shapes: list, *, target_ha: float, scale: float, arterials=None
     # outline reaches most of it (on a tie the larger, then the one met
     # first), to be counted and drawn there. Decided by share, not by
     # whether anything is left over: a block 2 m proud of a slot's mouth,
-    # drawn on its own, was the 2 m strip outside - a 0.0 ha assignment
+    # drawn on its own, was the 2 m strip outside - a 0.0-acre assignment
     # carrying every house, while the houses were drawn in the larger
     # group's outline and left out of its counts - and one flush with the
     # mouth joined. Centimetres must not flip that. A hemmed join is not
@@ -870,12 +872,13 @@ def group_blocks(shapes: list, *, target_ha: float, scale: float, arterials=None
     return result
 
 
-def urban_params(*, target_ha: float | None, resource_type: str, max_distance_m: float | None,
+def urban_params(*, target_acres: float | None, resource_type: str,
+                 max_distance_m: float | None,
                  building_markers: bool = False, marker_color: str = "#FFFFFF",
                  norms: dict | None = None) -> dict:
     """The parameters an urban set id is hashed over.
 
-    With no `target_ha` the target is the norms' median for the resource
+    With no `target_acres` the target is the norms' median for the resource
     type, so the norms decide the grouping, and their digest
     (`norms.norms_digest`; `norms` None is the shipped file) is hashed in.
     Without it a server restarted with another agency's `--norms` over the
@@ -894,10 +897,10 @@ def urban_params(*, target_ha: float | None, resource_type: str, max_distance_m:
     # The grouping method and the blocks' together: a set grouped back to
     # back, or over blocks drawn the older way, is grouped again (0.35.0).
     params = {"method": METHOD,
-              "target_ha": None if target_ha is None else float(target_ha),
+              "target_acres": None if target_acres is None else float(target_acres),
               "resource_type": (resource_type or "GROUND").strip().upper(),
               "max_distance_m": None if max_distance_m is None else float(max_distance_m)}
-    if target_ha is None:
+    if target_acres is None:
         params["norms_digest"] = norms_digest(norms if norms is not None else load_norms())
     if building_markers:
         params["building_markers"] = True
@@ -905,14 +908,14 @@ def urban_params(*, target_ha: float | None, resource_type: str, max_distance_m:
     return params
 
 
-def urban_assignments(directory, *, target_ha: float | None = None,
+def urban_assignments(directory, *, target_acres: float | None = None,
                       resource_type: str = "GROUND", norms: dict | None = None,
                       max_distance_m: float | None = None,
                       building_markers: bool = False, marker_color: str = "#FFFFFF",
                       wms_base_url: str | None = None, cache_dir: Path | None = None,
                       fetch=None) -> dict[str, Any]:
     """The populated blocks of the ground staged under `directory`, grouped
-    into assignments of about `target_ha` (default: the corpus median for
+    into assignments of about `target_acres` (default: the corpus median for
     `resource_type`, or of every assignment - with a warning - for a type
     the corpus has no median for), nearest the centre first.
 
@@ -934,6 +937,10 @@ def urban_assignments(directory, *, target_ha: float | None = None,
     resource = (resource_type or "GROUND").strip().upper()
     target_source = "given"
     sizing_warning = None
+    if target_acres is not None and not target_acres > 0:
+        raise ValueError(f"target_acres ({target_acres}) must be above zero")
+    # The grouping works in hectares, the corpus's unit.
+    target_ha = None if target_acres is None else float(target_acres) * HA_PER_ACRE
     if target_ha is None:
         target = target_area_range_ha(resource, norms)
         target_ha = float(target["p50"])
@@ -947,12 +954,13 @@ def urban_assignments(directory, *, target_ha: float | None = None,
             target_source = f"corpus median of every assignment (none for {resource})"
             sizing_warning = (f"the assignment corpus has no median for resource type "
                               f"{resource!r}, so the assignments are sized toward the median "
-                              f"of every assignment, {target_ha:g} ha; it has one for "
+                              f"of every assignment, {target_ha / HA_PER_ACRE:.1f} acres; "
+                              f"it has one for "
                               f"{known or 'no type'} - check the type is the one meant")
         else:
             target_source = f"corpus median for {resource}"
     if target_ha <= 0:
-        raise ValueError(f"target_ha ({target_ha}) must be above zero")
+        raise ValueError(f"target_acres ({target_ha / HA_PER_ACRE:g}) must be above zero")
 
     populated = populated_areas(directory, max_distance_m=max_distance_m,
                                 building_markers=building_markers, marker_color=marker_color,
@@ -1005,7 +1013,7 @@ def urban_assignments(directory, *, target_ha: float | None = None,
             "blocks": len(members),
             "parcels": int(sum(blocks[m]["facts"]["parcels"] for m in members)),
             "buildings": int(sum(blocks[m]["facts"]["buildings"] for m in members)),
-            "area_ha": round(geometry.area * scale * scale / 10_000, 2),
+            "area_acres": round(acres(geometry.area * scale * scale), 2),
             "point": {"latitude": latitude, "longitude": longitude},
             "distance_from_center_m": round(distance_m, 0),
             "bearing_from_center_deg": round(bearing % 360.0, 0),
@@ -1034,8 +1042,9 @@ def urban_assignments(directory, *, target_ha: float | None = None,
             group_warnings.append(
                 f"{listed}, most of whose ground lies inside this assignment's outline (in a "
                 f"courtyard or slot of its blocks), {'is' if len(names) == 1 else 'are'} "
-                f"counted and drawn here; that takes its blocks to {block_ha:.2f} ha, past "
-                f"the {ceiling_ha:.2f} ha ({MAX_SHARE * 100:g} % of the target) a merge "
+                f"counted and drawn here; that takes its blocks to "
+                f"{block_ha / HA_PER_ACRE:.1f} acres, past the {ceiling_ha / HA_PER_ACRE:.1f} "
+                f"acres ({MAX_SHARE * 100:g} % of the target) a merge "
                 "stops at")
         entry = {"name": streets[0] + (f" +{len(streets) - 1}" if len(streets) > 1 else ""),
                  "blocks": [blocks[m]["name"] for m in members], "facts": facts,
@@ -1047,11 +1056,11 @@ def urban_assignments(directory, *, target_ha: float | None = None,
         entries.append(entry)
     entries.sort(key=lambda entry: (entry.pop("_distance"), entry["name"]))
 
-    sizes = [entry["facts"]["area_ha"] for entry in entries]
+    sizes = [entry["facts"]["area_acres"] for entry in entries]
     summary = {
         "count": len(entries), "blocks": len(blocks),
-        "target_ha": round(target_ha, 2),
-        "area_ha": {"min": min(sizes), "median": sorted(sizes)[len(sizes) // 2],
+        "target_acres": round(target_ha / HA_PER_ACRE, 1),
+        "area_acres": {"min": min(sizes), "median": sorted(sizes)[len(sizes) // 2],
                     "max": max(sizes), "total": round(sum(sizes), 1)} if sizes else None,
         "parcels": int(sum(entry["facts"]["parcels"] for entry in entries)),
         "buildings": int(sum(entry["facts"]["buildings"] for entry in entries)),
@@ -1062,19 +1071,19 @@ def urban_assignments(directory, *, target_ha: float | None = None,
     assumptions = {
         **populated["assumptions"],
         "grouping": {
-            "target_ha": round(target_ha, 2), "target_source": target_source,
-            "max_ha": round(target_ha * MAX_SHARE, 2),
-            "settled_ha": round(target_ha * SETTLED_SHARE, 2),
+            "target_acres": round(target_ha / HA_PER_ACRE, 1), "target_source": target_source,
+            "max_acres": round(target_ha * MAX_SHARE / HA_PER_ACRE, 1),
+            "settled_acres": round(target_ha * SETTLED_SHARE / HA_PER_ACRE, 1),
             "neighbour_gap_m": NEIGHBOUR_GAP_M, "close_m": CLOSE_M,
             "water_gap_m": WATER_GAP_M, "snap_gap_m": SNAP_GAP_M,
             "arterials": sorted(ARTERIALS) if arterials is not None or not arterial_warning
             else "unknown",
             "junction_m": JUNCTION_M, "junction_reach_m": JUNCTION_REACH_M,
-            "fence_ha": round(target_ha * FENCE_SHARE, 2),
+            "fence_acres": round(target_ha * FENCE_SHARE / HA_PER_ACRE, 1),
             "rule": ("each block is one street, both sides, back fence to back fence; blocks "
                      "merge smallest first along the streets that join them (a cul-de-sac "
                      "into the road it opens onto) into the most compact shape, never across "
-                     "an arterial; a group still under fence_ha with no street to grow along "
+                     "an arterial; a group still under fence_acres with no street to grow along "
                      "joins a block it backs onto; small groups then pair across water, two "
                      "at most; whole blocks only; the ground between two assignments up to "
                      "snap_gap_m apart is split down its middle, so neighbours share one "

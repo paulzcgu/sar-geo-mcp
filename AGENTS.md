@@ -431,8 +431,8 @@ and a wrapper that only calls it.
   tool would refuse (`rings_ground`, through the feature's own
   `rings_model`), an export `label_prefix` `caltopo_export` would
   refuse or a blank export `resource_type` (`check_export_overrides`), a
-  `target_ha` not above zero
-  (`check_target_ha`), a block rule or marker colour (null included) the
+  `target_acres` not above zero
+  (`check_target_acres`), a block rule or marker colour (null included) the
   urban tools would refuse (`check_urban_overrides`, through
   `planning.populated.check_params`) and a search circle too wide to read
   lot lines over (`check_urban_radius`, through the feature's own
@@ -975,9 +975,9 @@ A first cut, not a census: an undrawn house reads as a vacant lot and an
 undrawn lot line as one lot. The planner adjusts the blocks and decides
 which to search first.
 
-`urban_assignments(handle, target_ha)` turns those blocks into assignments
-of about one size - 10 ha by default, the corpus median for a ground team
-(`resource_type`), or the `target_ha` you give. A type the corpus has no
+`urban_assignments(handle, target_acres)` turns those blocks into
+assignments of about one size - 25 acres by default, the corpus median for a
+ground team (`resource_type`), or the `target_acres` you give. A type the corpus has no
 median for - DOGS for DOG - is sized by the median of every assignment, and
 `target_source` and a warning say so rather than name a median it lacks.
 Each block is one street, both sides, back fence to back fence, and blocks
@@ -985,15 +985,15 @@ merge smallest first along the streets that join them - a cul-de-sac into
 the road it opens onto - into the most compact shape, until a group reaches
 60 % of the target and never past 140 %, so a team always has both sides of
 its streets; blocks that only back onto each other merge only when a group
-is left under 30 % of the target. Hand-drawn door-to-door assignments run 1
-to 4 ha: pass `target_ha` (about 2.5) for teams that size. A group never
+is left under 30 % of the target. Hand-drawn door-to-door assignments run 2.5
+to 10 acres: pass `target_acres` (about 6) for teams that size. A group never
 crosses an arterial (an OpenStreetMap motorway, trunk, primary or secondary
 road), so the boulevards are the edges; small groups left over pair across
 water, two at most - two isles a team drives between - drawn as one polygon
 by a thin strip. Sizes follow the streets, so they spread round the target:
 in a bayside suburb (0.33.0, before street-joined merging), half a mile
-round a residential street at 11.7 ha, 65 blocks became
-14 assignments of 3.9 to 16.2 ha, median 11.0, and the smallest is a pocket
+round a residential street at 29 acres, 65 blocks became
+14 assignments of 9.6 to 40 acres, median 27, and the smallest is a pocket
 boxed in by two boulevards. Pass `max_distance_m` (the radius) to keep the
 blocks of the search circle: every block the circle reaches is kept whole,
 out to the back fences beyond the nearest street - and out to the end of
@@ -1012,7 +1012,7 @@ T junction; a boulevard's median goes with the ground beside it; and ground betw
 (`snap_gap_m`) with no street through it - a fence-line strip - is split
 down its middle. No gap, no overlap, and every edge simplified as one
 coverage, so a shared edge is one line. An outer back fence facing no other
-assignment stays where it is. `area_ha` includes the street ground taken.
+assignment stays where it is. `area_acres` includes the street ground taken.
 
 `caltopo_export(handle, set_id)` writes any candidate set - urban
 assignments, populated blocks, hasty lines - as a GeoJSON file CalTopo
@@ -1124,6 +1124,11 @@ are unknown. A failed road or helipad lookup is a warning; a failed hospital
 lookup is an error.
 
 `assignment_norms(resource_type)` gives the defaults and their provenance.
+**Areas are in acres**, everywhere a tool answers (`area_acres`,
+`target_acres`, `target_area_acres`, an `area_acres` norm flag): the unit a
+search planner works in. The corpus file keeps its hectares
+(`polygon_area_ha`, `area_ha_by_resource`), as another agency's file is
+written, and is converted on the way out (`geo.acres`, `norms_in_acres`).
 What the agent must not delegate: the radius and region, the resource and
 team hours, the wording, the priority, any likelihood reasoning - the server
 has no opinion on any of these and returns none. Summaries carry ids, not

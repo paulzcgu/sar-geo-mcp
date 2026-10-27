@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 from ..context import ServerContext, mcp_tool
-from ..planning.norms import target_area_range_ha
+from ..planning.norms import norms_in_acres, target_area_range_acres
 
 
 def assignment_norms(ctx: ServerContext, resource_type: str = "") -> dict[str, Any]:
@@ -16,15 +15,15 @@ def assignment_norms(ctx: ServerContext, resource_type: str = "") -> dict[str, A
     # "filtered" in the spec means annotated: the whole file comes back
     # (about 800 tokens) plus the resource's target range, so a reader
     # keeps the provenance beside the number.
-    # A deep copy, not `dict(...)`: these are the server's own norms, which
+    # A deep copy (`norms_in_acres` makes one), not `dict(...)`: these are the server's own norms, which
     # hasty, boundary and urban read on every call. Over MCP the payload is
     # serialised, so nothing is shared; a scenario calling this directly
     # gets the objects themselves, and changing one nested value would
     # change every later answer in this server process.
-    payload = copy.deepcopy(ctx.norms)
+    payload = norms_in_acres(ctx.norms)
     if resource_type:
         payload["resource_type"] = resource_type.strip().upper()
-        payload["target_area_ha"] = target_area_range_ha(resource_type, ctx.norms)
+        payload["target_area_acres"] = target_area_range_acres(resource_type, ctx.norms)
     return payload
 
 
@@ -38,8 +37,10 @@ def register(mcp, ctx) -> None:
         From 65 real searches and 4,673 assignments. Use it to tell a human
         where a default came from, and to read a norm flag on a candidate
         or a boundary. `resource_type` (GROUND, GROUND_1, DOG_HRD, UAV, ...)
-        adds that resource's target area range, derived from its corpus
-        median by the stated ratio rule. The server can be started with
-        another agency's file (`--norms`).
+        adds that resource's target area range in acres
+        (`target_area_acres`), derived from its corpus median by the stated
+        ratio rule. Every area here is in acres (`polygon_area_acres`,
+        `area_acres_by_resource`); the corpus file itself keeps hectares.
+        The server can be started with another agency's file (`--norms`).
         """
         return assignment_norms(ctx, resource_type=resource_type)

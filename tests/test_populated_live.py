@@ -95,7 +95,7 @@ def test_live_berwick_drive_is_one_block_across_the_street(tmp_path):
     from sar_geo_mcp.planning.export import export_set
     from sar_geo_mcp.planning.urban import urban_params, urban_set
 
-    params = urban_params(target_ha=10.0, resource_type="GROUND", max_distance_m=None)
+    params = urban_params(target_acres=10.0, resource_type="GROUND", max_distance_m=None)
     cset = urban_set(directory, params, handle=staged["handle"], norms=None,
                      wms_base_url=config.wms_base_url(), cache_dir=cache_root)
     save_set(directory, cset)
@@ -110,4 +110,4 @@ def test_live_berwick_drive_is_one_block_across_the_street(tmp_path):
     for block in result["blocks"]:
         facts = block["facts"]
         print(block["kind"], block["name"], facts["parcels"], facts["buildings"],
-              facts["area_ha"], facts["distance_from_center_m"])
+              facts["area_acres"], facts["distance_from_center_m"])

@@ -8,6 +8,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
+from sar_geo_mcp.geo import HA_PER_ACRE
 from PIL import Image
 
 pytest.importorskip("fastmcp")
@@ -64,10 +66,10 @@ async def test_the_three_planning_tools_are_registered_with_descriptions(server)
 async def test_assignment_norms_returns_the_file_and_a_resource_slice(server):
     everything = await call(server, "assignment_norms")
     assert everything["provenance"]["maps"] == 65
-    assert "polygon_area_ha" in everything
+    assert "polygon_area_acres" in everything and "polygon_area_ha" not in everything
     ground = await call(server, "assignment_norms", resource_type="GROUND")
     assert ground["resource_type"] == "GROUND"
-    assert ground["target_area_ha"]["p50"] == 10.0
+    assert ground["target_area_acres"]["p50"] == 24.7          # 10 ha
     assert ground["provenance"]["maps"] == 65
 
 
@@ -643,13 +645,13 @@ async def test_urban_assignments_then_caltopo_export_end_to_end(monkeypatch, tmp
     area = await call(server, "prepare_area", center_latitude=PLS[0],
                       center_longitude=PLS[1], radius=0.1, radius_unit="mi")
 
-    grouped = await call(server, "urban_assignments", handle=area["handle"], target_ha=2.0,
+    grouped = await call(server, "urban_assignments", handle=area["handle"], target_acres=2.0 / HA_PER_ACRE,
                          building_markers=True)
     assert grouped["set_id"].startswith("urban-") and grouped["reused"] is False
     (summary,) = grouped["candidates"]
     assert summary["kind"] == "assignment" and summary["name"] == "Elm Street"
     assert "geometry" not in summary and "markers" not in summary
-    again = await call(server, "urban_assignments", handle=area["handle"], target_ha=2.0,
+    again = await call(server, "urban_assignments", handle=area["handle"], target_acres=2.0 / HA_PER_ACRE,
                        building_markers=True)
     assert again["reused"] is True
 
@@ -678,7 +680,7 @@ async def test_populated_areas_without_a_token_is_refused(server, monkeypatch):
 @pytest.mark.anyio
 @pytest.mark.parametrize("tool, staging, arguments", [
     ("populated_areas", {"radius_m": 170}, {}),
-    ("urban_assignments", {"radius": 0.1, "radius_unit": "mi"}, {"target_ha": 2.0}),
+    ("urban_assignments", {"radius": 0.1, "radius_unit": "mi"}, {"target_acres": 2.0 / HA_PER_ACRE}),
 ])
 async def test_the_urban_tools_carry_the_handles_staleness_and_warnings(
         server, monkeypatch, tmp_path, tool, staging, arguments):

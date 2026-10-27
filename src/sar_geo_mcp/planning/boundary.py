@@ -67,7 +67,8 @@ from ..terrain.features.context import TerrainContext
 from ..terrain.grid import project_geometry_to_3857
 from ..terrain.hydro import HYDRO_ASSUMPTIONS, extract_channels, upstream_is_truncated
 from ..terrain.linear import OSM_QUERY_VERSION_BARRIERS, OSM_QUERY_VERSION_MINOR_LINES
-from .norms import load_norms, norm_flags, resource_median_ha, target_area_range_ha
+from ..geo import acres
+from .norms import load_norms, norm_flags, resource_median_ha, target_area_range_acres
 
 #: Ground metres between boundary samples.
 SAMPLE_SPACING_M = 10.0
@@ -125,7 +126,7 @@ STALE_OSM_MINOR_LINES_WARNING = (
 
 
 class Size(BaseModel):
-    area_ha: float | None
+    area_acres: float | None
     perimeter_m: float | None
     length_m: float
     width_m: float | None
@@ -834,7 +835,7 @@ def describe_boundary(data_dir: Path, geometry_wgs84: dict, *, norms: dict | Non
             shared_pct = 0.0
 
     if is_line:
-        size = Size(area_ha=None, perimeter_m=None, length_m=total_m, width_m=None, mean_width_m=None)
+        size = Size(area_acres=None, perimeter_m=None, length_m=total_m, width_m=None, mean_width_m=None)
         shape_kind, axis, axis_ratio = "line", None, None
         interior: dict = {}
     else:
@@ -844,7 +845,7 @@ def describe_boundary(data_dir: Path, geometry_wgs84: dict, *, norms: dict | Non
         e2 = math.hypot(rc[2][0] - rc[1][0], rc[2][1] - rc[1][1]) * scale
         length_m, width_m = max(e1, e2), min(e1, e2)
         mean_width_m = area_m2 / length_m if length_m else 0.0
-        size = Size(area_ha=area_m2 / 1e4, perimeter_m=total_m, length_m=length_m,
+        size = Size(area_acres=acres(area_m2), perimeter_m=total_m, length_m=length_m,
                     width_m=width_m, mean_width_m=mean_width_m)
         interior, axis_m = _interior(ground, target, warnings)
         aspect = length_m / width_m if width_m else float("inf")
@@ -871,7 +872,7 @@ def describe_boundary(data_dir: Path, geometry_wgs84: dict, *, norms: dict | Non
     if shape_kind == "line":
         facts["length_m"] = total_m
     else:
-        facts["area_ha"] = size.area_ha
+        facts["area_acres"] = size.area_acres
         if shape_kind == "corridor":
             facts["width_m"] = size.mean_width_m
     flags = norm_flags(facts, norms, resource_type)
@@ -919,15 +920,16 @@ def _area_band_note(norms: dict, resource_type: str) -> str:
     """
     key = (resource_type or "").strip().upper()
     if key and resource_median_ha(key, norms) is not None:
-        spread = target_area_range_ha(key, norms)
-        return (f"area_ha, where the target has one, was banded against the {key} target range "
-                f"({spread['p25']:.3g} to {spread['p75']:.3g} ha, p25-p75 derived from that "
-                f"resource's corpus median of {spread['p50']:.3g} ha); the other metrics "
+        spread = target_area_range_acres(key, norms)
+        return (f"area_acres, where the target has one, was banded against the {key} target "
+                f"range ({spread['p25']:.3g} to {spread['p75']:.3g} acres, p25-p75 derived "
+                f"from that resource's corpus median of {spread['p50']:.3g} acres); the other "
+                "metrics "
                 "are banded against the whole corpus, which has no per-resource figures "
                 "for them")
     reason = (f"the corpus has no median for resource_type {key}" if key
               else "no resource_type was given")
-    return (f"area_ha, where the target has one, was banded against the whole corpus "
+    return (f"area_acres, where the target has one, was banded against the whole corpus "
             f"p10-p90 because {reason}; pass a resource_type the corpus knows to band it "
             "against that resource instead")
 

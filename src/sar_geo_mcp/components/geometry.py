@@ -134,7 +134,7 @@ def register(mcp, ctx) -> None:
         `distance_m` ground metres each side of it, round ends. Takes a
         GeoJSON LineString, MultiLineString, Polygon or MultiPolygon in
         WGS84 and returns the polygon with `width_m` (twice the distance)
-        and `area_ha`. A line search on a CalTopo map is such a ribbon,
+        and `area_acres`. A line search on a CalTopo map is such a ribbon,
         15 m each side by default. Distances above 1,000 m are refused.
 
         Set `single_ring` for a result bound for CalTopo. A way that closes

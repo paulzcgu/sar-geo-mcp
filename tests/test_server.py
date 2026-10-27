@@ -557,7 +557,7 @@ async def test_buffer_geometry_answers_with_the_ribbon_and_its_width(server):
     result = await call(server, "buffer_geometry", geometry=line, distance_m=15)
     assert result["geometry"]["type"] == "Polygon"
     assert result["width_m"] == 30.0
-    assert result["area_ha"] == pytest.approx(6.75, abs=0.1)
+    assert result["area_acres"] == pytest.approx(16.68, abs=0.25)
 
 
 @pytest.mark.anyio
