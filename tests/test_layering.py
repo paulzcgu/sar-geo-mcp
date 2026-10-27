@@ -59,6 +59,13 @@ INFRA = {
     "cache.evict", "tiles", "geo", "updates",
     "caltopo", "caltopo.session", "caltopo.wms", "caltopo.state", "caltopo.reader",
 }
+#: Every module of the `sources` package is infra: a data source fetches and
+#: caches a service's own data and knows nothing of search and rescue. Added
+#: by package rather than by name, so a new source is held to that at once.
+SOURCES_PACKAGE = "sources"
+INFRA |= {SOURCES_PACKAGE} | {
+    f"{SOURCES_PACKAGE}.{path.stem}"
+    for path in (ROOT / SOURCES_PACKAGE).glob("*.py") if path.stem != "__init__"}
 WIRING = {"server", "context"}
 TOOL_LAYERS = {"components": 2, "features": 3, "scenarios": 4}
 RANK = {"infra": 0, "domain": 1, "component": 2, "feature": 3, "scenario": 4}
