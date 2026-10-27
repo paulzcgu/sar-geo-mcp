@@ -696,6 +696,29 @@ def fetch_osm_tiles(tiles: list[tuple[int, int]], cache_dir: Path,
             for tile in tiles]
 
 
+def helipads_near(points: list[tuple[float, float]], radius_m: float,
+                  *, post=None) -> list[dict]:
+    """OSM helipads and heliports within `radius_m` of any point, one query:
+    [{latitude, longitude, name}]."""
+    if not points:
+        return []
+    if post is None:
+        post = _http_post
+    clauses = "".join(
+        f'nwr(around:{radius_m:.0f},{lat:.6f},{lon:.6f})[aeroway~"^(helipad|heliport)$"];'
+        for lat, lon in points)
+    payload = post(f"[out:json][timeout:25];({clauses});out center tags;")
+    pads = []
+    for element in payload.get("elements") or []:
+        centre = element.get("center") or element
+        if "lat" not in centre or "lon" not in centre:
+            continue
+        tags = element.get("tags") or {}
+        pads.append({"latitude": float(centre["lat"]), "longitude": float(centre["lon"]),
+                     "name": tags.get("name") or tags.get("operator")})
+    return pads
+
+
 #: The most elements one generic query returns, whatever `limit` asks.
 QUERY_MAX_FEATURES = 5000
 

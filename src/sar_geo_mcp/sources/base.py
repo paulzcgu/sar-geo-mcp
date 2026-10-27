@@ -227,3 +227,37 @@ class ServiceSource(DataSource):
     @abstractmethod
     def call(self, **params: Any) -> dict[str, Any]:
         """The service's answer to one request."""
+
+
+#: How this package introduces itself to every public service it reads. The
+#: OSRM demo and Overpass ask for an identifying User-Agent; the rest get
+#: the same courtesy.
+USER_AGENT = "sar-geo-mcp (search and rescue planning)"
+
+
+def http_get(url: str, params: Mapping[str, Any] | None = None, *,
+             timeout: float = 30.0):
+    """A GET behind the shared retry policy (`net.get_with_retry`: three
+    attempts, one second's backoff doubling) with the package's User-Agent.
+    Returns the response; `.json()` reads it."""
+    import functools
+
+    import httpx
+
+    from ..net import get_with_retry
+
+    request = httpx.Request("GET", url, params=params)
+    return get_with_retry(
+        str(request.url), attempts=3, base_delay=1.0, timeout=timeout,
+        get=functools.partial(httpx.get, headers={"User-Agent": USER_AGENT}))
+
+
+class JsonResponse:
+    """What a fetcher reads off a response (`.json()`), from a transport's
+    already-parsed answer: lets a test transport stand in for `http_get`."""
+
+    def __init__(self, payload: Any):
+        self._payload = payload
+
+    def json(self) -> Any:
+        return self._payload

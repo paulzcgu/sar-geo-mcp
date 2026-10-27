@@ -59,9 +59,15 @@ from pathlib import Path
 from typing import Any
 
 from ..net_errors import safe_reason
-from .base import Area, FeatureResult, FeatureSource, SourceInfo, SourceUnavailable
-
-USER_AGENT = "sar-geo-mcp (search and rescue planning)"
+from .base import (
+    Area,
+    FeatureResult,
+    FeatureSource,
+    JsonResponse,
+    SourceInfo,
+    SourceUnavailable,
+    http_get,
+)
 
 CACHE_FILENAME = "agency_ways.json"
 
@@ -249,16 +255,8 @@ SOURCES: dict[str, tuple[Layer, ...]] = {
 AGENCY_SOURCES = tuple(SOURCES)
 
 
-def _http_get(url: str, params: dict | None = None, *, timeout: float = 60.0):
-    """A GET with the shared retry policy and an identifying User-Agent."""
-    import httpx
-
-    from ..net import get_with_retry
-
-    request = httpx.Request("GET", url, params=params)
-    return get_with_retry(
-        str(request.url), attempts=3, base_delay=1.0, timeout=timeout,
-        get=functools.partial(httpx.get, headers={"User-Agent": USER_AGENT}))
+#: The agency services can be slow over a large box: a minute per request.
+_http_get = functools.partial(http_get, timeout=60.0)
 
 
 def esri_paths_to_geojson(geometry: dict | None) -> dict | None:
@@ -362,16 +360,6 @@ def load_agency_ways(directory: Path, bbox_wgs84, sources: list[str], *,
     return answers
 
 
-class _JsonResponse:
-    """What `query_layer` reads off a response, from a transport's JSON."""
-
-    def __init__(self, payload):
-        self._payload = payload
-
-    def json(self):
-        return self._payload
-
-
 class AgencyWaysSource(FeatureSource):
     """The land agencies' road and trail inventories, as a source.
 
@@ -419,7 +407,7 @@ class AgencyWaysSource(FeatureSource):
         get = None
         if self.transport is not None:
             transport = self.transport
-            get = lambda url, params=None: _JsonResponse(transport.get_json(url, params))  # noqa: E731
+            get = lambda url, params=None: JsonResponse(transport.get_json(url, params))  # noqa: E731
         answers = load_agency_ways(directory, box, sources, get=get)
         features, warnings = [], []
         for source, answer in answers.items():

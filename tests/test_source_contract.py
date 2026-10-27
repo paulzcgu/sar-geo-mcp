@@ -130,6 +130,40 @@ def _agency_ways(tmp_path: Path):
     return result
 
 
+def _hifld_hospitals(tmp_path: Path):
+    from sar_geo_mcp.sources.hifld import HifldHospitalsSource
+
+    latitude, longitude = AREA.center_wgs84
+    answer = {"features": [{"attributes": {"ID": "1", "NAME": "Made-up General",
+                                           "STATUS": "OPEN"},
+                            "geometry": {"x": longitude, "y": latitude}}]}
+    result = HifldHospitalsSource(transport=FakeTransport(json_body=answer)).query(AREA)
+    assert result.features[0]["properties"]["NAME"] == "Made-up General"
+    return result
+
+
+def _osrm(tmp_path: Path):
+    from sar_geo_mcp.sources.osrm import OsrmRoadSource
+
+    answer = {"code": "Ok", "distances": [[0, 1200.0]], "durations": [[0, 90.0]],
+              "sources": [{"distance": 4.0, "location": [-122.3151, 37.4244]}],
+              "destinations": [{}, {"distance": 2.0}]}
+    result = OsrmRoadSource(transport=FakeTransport(json_body=answer)).call(
+        origin=(37.4244, -122.3151), destinations=[(37.4100, -122.3390)])
+    assert result["legs"] == [{"distance_m": 1200.0, "duration_s": 90.0, "snap_m": 2.0}]
+    return result
+
+
+def _tigerweb_states(tmp_path: Path):
+    from sar_geo_mcp.sources.tigerweb import TigerwebStatesSource
+
+    answer = {"features": [{"attributes": {"STUSAB": "CA"}}]}
+    result = TigerwebStatesSource(transport=FakeTransport(json_body=answer)).call(
+        latitude=37.4244, longitude=-122.3151)
+    assert result == {"state": "CA"}
+    return result
+
+
 #: name -> run the source once against a fake network; returns its result.
 FAKE_CALLS: dict[str, Callable[[Path], object]] = {
     "usgs_3dep": _usgs_3dep,
@@ -137,6 +171,9 @@ FAKE_CALLS: dict[str, Callable[[Path], object]] = {
     "caltopo_wms": _caltopo_wms,
     "osm": _osm,
     "agency_ways": _agency_ways,
+    "hifld_hospitals": _hifld_hospitals,
+    "osrm": _osrm,
+    "tigerweb_states": _tigerweb_states,
 }
 
 CLASSES = sources.source_classes()
