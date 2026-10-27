@@ -1,0 +1,6 @@
+#!/bin/sh
+# Refuse real search data in what is about to be committed.
+# Turn the hooks on once per clone: git config core.hooksPath .githooks
+root=$(git rev-parse --show-toplevel)
+py=$(command -v python3 || echo "$root/.venv/bin/python")
+exec "$py" "$root/scripts/check_sensitive.py" --staged

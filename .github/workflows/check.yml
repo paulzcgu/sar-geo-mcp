@@ -1,0 +1,60 @@
+# Refuse real search data in a pull request, or in a push to master:
+# the diff, every commit message, and the PR's title and body.
+# scripts/check_sensitive.py says what it looks for. The local git hooks
+# can be skipped with --no-verify; this cannot.
+#
+# Real names, map ids and places go in the repository secret SAR_DENYLIST
+# (the private denylist's text). Without it - a fork's PR, say - only the
+# generic rules run. Findings name a line, never what matched.
+name: check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  sensitive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Private denylist
+        env:
+          SAR_DENYLIST: ${{ secrets.SAR_DENYLIST }}
+        run: |
+          if [ -n "$SAR_DENYLIST" ]; then
+            printf '%s\n' "$SAR_DENYLIST" > "$RUNNER_TEMP/denylist.txt"
+            echo "SAR_SENSITIVE_DENYLIST=$RUNNER_TEMP/denylist.txt" >> "$GITHUB_ENV"
+          else
+            echo "::notice::SAR_DENYLIST is not set; generic rules only"
+          fi
+      - name: Pull request diff, commits, title and body
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python scripts/check_sensitive.py --range "$BASE..$HEAD" --quiet
+          printf '%s\n\n%s\n' "$TITLE" "$BODY" | python scripts/check_sensitive.py --text - --label "pull request" --quiet
+      - name: Pushed commits
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            python scripts/check_sensitive.py --tree --quiet
+          else
+            python scripts/check_sensitive.py --range "$BEFORE..$AFTER" --quiet
+          fi

@@ -26,3 +26,11 @@ build/
 # long-form design docs, and the HTML guide until it is regenerated on a
 # public demo map. The architecture rules live in AGENTS.md.
 docs/
+
+# Claude Code: the shared settings are tracked, the rest is per machine.
+.claude/*
+!.claude/settings.json
+
+# The private list of real names, map ids and places that
+# scripts/check_sensitive.py refuses. It must never be committed.
+*denylist*

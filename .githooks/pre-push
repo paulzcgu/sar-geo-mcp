@@ -1,0 +1,7 @@
+#!/bin/sh
+# Refuse a push that would send real search data or a credential, checking
+# every commit the remote does not already have. Pushing an old branch to
+# the public remote would publish its whole history; this catches it.
+root=$(git rev-parse --show-toplevel)
+py=$(command -v python3 || echo "$root/.venv/bin/python")
+exec "$py" "$root/scripts/check_sensitive.py" --push "$1" --quiet

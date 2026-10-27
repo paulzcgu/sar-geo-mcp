@@ -7,6 +7,8 @@ Before anything is pushed, it checks that:
 - the working tree is clean (what is tagged is what was tested),
 - tag v<version> does not exist here or on origin,
 - pyproject.toml has a `# <version>:` comment block (it becomes the notes),
+- no real search data is in the commits since the last tag or in the
+  notes (scripts/check_sensitive.py),
 - the tests pass (live tests excluded, as in CI).
 
 Then it makes the annotated tag v<version>, its message the release notes,
@@ -64,6 +66,19 @@ def main() -> int:
         return fail(f"tag {tag} already exists here; bump the version")
     if run("git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}", capture=True):
         return fail(f"tag {tag} already exists on origin; bump the version")
+
+    print("release: checking for real search data ...")
+    try:
+        last = run("git", "describe", "--tags", "--abbrev=0", capture=True)
+    except subprocess.CalledProcessError:
+        last = ""
+    check = [sys.executable, str(ROOT / "scripts" / "check_sensitive.py")]
+    scope = ["--range", f"{last}..HEAD"] if last else ["--tree"]
+    if subprocess.run(check + scope, cwd=ROOT).returncode:
+        return fail("real search data in the commits being released; see above")
+    if subprocess.run(check + ["--text", "-", "--label", "release notes", "--quiet"],
+                      cwd=ROOT, input=notes, text=True).returncode:
+        return fail("real search data in the release notes; see above")
 
     if not args.skip_tests:
         print("release: running tests ...")

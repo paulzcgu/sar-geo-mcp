@@ -22,7 +22,7 @@ from sar_geo_mcp.scenarios._sections import error_text
 
 SECRETS = {
     "caltopo_id": "CRED12345678",
-    "caltopo_key": "c2VjcmV0LWtleS1mb3ItdGVzdHMtb25seS0xMjM0NTY3",
+    "caltopo_key": "c2VjcmV0LWtleS1mb3ItdGVzdHMtb25seS0xMjM0NTY3",  # fixture-ok: fake
     "wms_token": "AB12CD",
     "mapbox_token": "pk.mapbox-secret",
     "google_maps_key": "AIza-google-secret",

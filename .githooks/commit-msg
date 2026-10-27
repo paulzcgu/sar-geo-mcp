@@ -1,0 +1,5 @@
+#!/bin/sh
+# Refuse real search data in the commit message.
+root=$(git rev-parse --show-toplevel)
+py=$(command -v python3 || echo "$root/.venv/bin/python")
+exec "$py" "$root/scripts/check_sensitive.py" --message "$1" --quiet

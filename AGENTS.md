@@ -15,6 +15,11 @@ for the people who use SAR Geo; this file is for changing it.
   the release notes.
 - Tests: `.venv/bin/python -m pytest -q -m "not live"`. Live tests hit the
   network and are opt-in.
+- No real search data, anywhere: not in code, tests, fixtures, commit
+  messages, PRs or release notes. That means no subject or team member
+  names, incident numbers, real map ids, or real places last seen, finds
+  or landing zones. Use made-up values (see *Keeping real search data
+  out*).
 
 ## Two ways in, one implementation
 
@@ -64,6 +69,61 @@ separate decision with a threat model attached rather than a flag.
 JSON-RPC stream — `caltopo_python`'s own log handler did exactly that, and
 the server now repoints stdout handlers to stderr before it starts. If you
 add a dependency, keep it off stdout.
+
+## Keeping real search data out
+
+This repository is public, and so are its CI logs.
+`scripts/check_sensitive.py` refuses real search data and credentials in
+these places:
+
+| Where | How | What it reads |
+|---|---|---|
+| Commit | `.githooks/pre-commit`, `.githooks/commit-msg` | Staged lines, commit message |
+| Push | `.githooks/pre-push` | Every commit the remote lacks; an old branch sends its whole history |
+| PR, push to master | `.github/workflows/check.yml` | Diff, every commit message, PR title and body |
+| Release | `scripts/release.py` | Commits since the last tag, the release notes |
+| Claude Code | `scripts/claude_pr_guard.py` (`.claude/settings.json`) | Text a `gh pr/issue/release` command would publish |
+
+Turn the git hooks on once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+It runs two sets of rules:
+
+- **Generic rules, in the repository.** Any coordinate more than 250 m
+  from every point in `tests/fixture_points.py` is refused. So is any
+  MGRS or UTM reference or CalTopo map id not listed there, and any data
+  file: GPX, KML, GeoJSON, GeoTIFF, a staged `manifest.json`, `cache/`,
+  `docs/`, `exports/`, credentials. To use a made-up value, add it to
+  `tests/fixture_points.py`, or mark its line `fixture-ok`.
+- **A private denylist, outside the repository.** It lists real names,
+  incident numbers, map ids (`map ID`), patterns (`re ...`) and places
+  (`point LAT LON RADIUS_M`). Keep it at `~/.config/sar_geo/denylist.txt`
+  or set `SAR_SENSITIVE_DENYLIST`. For CI, put its text in the repository
+  secret `SAR_DENYLIST`. Nothing excuses a denylist hit, and a finding
+  names the line, never the text it matched.
+- **Credentials.** The check reads the real values on this machine: every
+  value and account name in `cts.ini`, the token and key variables in
+  `.env`, and the `ZA_*` token and key variables in the environment. Any of
+  them appearing anywhere is refused, and `fixture-ok` does not excuse it.
+  Known token formats are refused too: GitHub, PyPI, Google, Mapbox, AWS,
+  Slack, Anthropic and OpenAI keys, JWTs, private keys, and a password in
+  a URL (unless the host is `.example`, `.test`, `.local` or localhost).
+  So is a long, random-looking value given to a setting with a secret
+  name. So are key files (`.pem`, `.key`, `id_rsa`, `.pypirc`,
+  `credentials.json`). A test's fake token that looks real carries
+  `fixture-ok`. GitHub secret scanning and push protection are on for the
+  public repository as a second net.
+
+`--history` scans every commit on every branch, and `--tree` scans the
+working copy of every tracked file.
+
+Only the PR workflow cannot be skipped. `git commit --no-verify` skips
+the local hooks, so the workflow is the backstop. A check cannot clean
+history: if real data was ever pushed, rewrite the history and rotate
+anything it exposed.
 
 ## The Claude Desktop extension and releasing
 
