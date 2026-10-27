@@ -427,7 +427,7 @@ def run_prefetch(
     returned in the result.
     """
     from .caltopo.wms import fetch_panel_tile
-    from .terrain.dem import fetch_dem_tile
+    from .sources.dem import fetch_dem_tile
 
     cache_dir = Path(cache_dir)
     plan = plan_prefetch(map_id, features, cache_dir, panel_sets, include_terrain)

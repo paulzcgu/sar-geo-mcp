@@ -33,7 +33,7 @@ def index_rows(cache_dir: Path) -> list[tuple[str, str, str | None]]:
 
 
 def test_3dep_elevation_cache_names(tmp_path):
-    from sar_geo_mcp.terrain.dem import fetch_dem
+    from sar_geo_mcp.sources.dem import fetch_dem
 
     fetch_dem(BBOX, 64, 64, cache_dir=tmp_path,
               get_bytes=lambda url: synthetic_tile_bytes())
@@ -65,7 +65,7 @@ def test_caltopo_wms_cache_names(tmp_path):
 
 
 def test_landfire_vegetation_cache_names(tmp_path):
-    from sar_geo_mcp.terrain import evt
+    from sar_geo_mcp.sources import landfire as evt
 
     evt.fetch_tile(-3404, 1120, tmp_path, get_bytes=lambda url: fake_tile_bytes())
 

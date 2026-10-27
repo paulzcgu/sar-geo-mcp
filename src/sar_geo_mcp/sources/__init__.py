@@ -26,9 +26,10 @@ from .base import (
     SourceUnavailable,
     Transport,
 )
+from . import dem, landfire
 
 #: Source modules, each defining one or more `DataSource` subclasses.
-MODULES: tuple[ModuleType, ...] = ()
+MODULES: tuple[ModuleType, ...] = (dem, landfire)
 
 
 def source_classes() -> dict[str, type[DataSource]]:

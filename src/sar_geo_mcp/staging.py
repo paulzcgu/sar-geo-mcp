@@ -28,8 +28,8 @@ import math
 from pathlib import Path
 
 from .cache import atomic_write_text
-from .terrain.dem import fetch_dem, read_dem_grid
-from .terrain.evt import write_evt_clip
+from .sources.dem import fetch_dem, read_dem_grid
+from .sources.landfire import write_evt_clip
 from .terrain.shapes import METRICS_FILENAME
 from .geo import (
     Bbox,
@@ -47,7 +47,7 @@ from .tiles import level_for, tiles_covering
 STAGE_PIXELS = 1024
 
 #: Ceiling on the longest edge, set by the 3DEP exportImage service rather
-#: than by us (`terrain.dem.MAX_DEM_PIXELS`). `fetch_dem` tiles at 1,024 and
+#: than by us (`sources.dem.MAX_DEM_PIXELS`). `fetch_dem` tiles at 1,024 and
 #: mosaics, so the practical cost of a larger request is bandwidth and time,
 #: not a different code path.
 MAX_STAGE_PIXELS = 8000

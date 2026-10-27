@@ -1,4 +1,4 @@
-"""USGS 3DEP elevation access.
+"""USGS 3DEP elevation: the source every measurement stands on.
 
 The rendered CalTopo layers cannot answer 'how deep' or 'how steep' in real
 units. This module supplies the float32 elevation grid that all measurement
@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 import numpy as np
 
 from ..geo import Bbox
+from .base import Area, RasterResult, RasterSource, SourceInfo
 from ..cache import atomic_output, atomic_write_bytes, note_hit, note_write
 from ..tiles import (
     TILE_PX,
@@ -229,3 +230,34 @@ def read_dem_grid(path: Path) -> tuple[float, Bbox]:
             bounds.right,
             bounds.top,
         )
+
+
+class Usgs3depSource(RasterSource):
+    """USGS 3DEP elevation as a source: a float32 GeoTIFF of an area, built
+    from the shared tile grid the staging and prefetch paths use."""
+
+    info = SourceInfo(
+        name="usgs_3dep",
+        title="USGS 3DEP elevation",
+        kind="raster",
+        provider="U.S. Geological Survey, 3D Elevation Program",
+        default_url=EXPORT_URL,
+        attribution="USGS 3DEP",
+        coverage="US: 1 m lidar where flown, about 10 m elsewhere",
+        native_resolution_m=1.0,
+        notes=(
+            "Best available, mosaicked: asking for 1 m where only 10 m was flown "
+            "returns a smooth interpolation, not detail.",
+            "Bare earth: no boulders, downed timber or brush.",
+        ),
+    )
+
+    def fetch(self, area: Area, width_px: int, height_px: int,
+              **options) -> RasterResult:
+        if options:
+            raise ValueError(f"usgs_3dep takes no options; got {sorted(options)}")
+        get_bytes = self.transport.get_bytes if self.transport else _http_get
+        path = fetch_dem(area.bbox_3857, width_px, height_px, self.require_cache(),
+                         get_bytes=get_bytes)
+        return RasterResult(path=path, bbox_3857=area.bbox_3857, width_px=width_px,
+                            height_px=height_px, attribution=self.info.attribution)

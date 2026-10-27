@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from sar_geo_mcp.cache import CacheIndex, note_hit, note_write
-from sar_geo_mcp.terrain.dem import TIFF_MAGIC_LE
+from sar_geo_mcp.sources.dem import TIFF_MAGIC_LE
 
 
 @pytest.fixture
@@ -153,7 +153,7 @@ def test_recording_a_file_that_vanished_is_a_no_op(index):
 
 def test_a_fetched_evt_tile_lands_in_the_index(tmp_path):
     """Wiring test: the index is only worth having if the fetchers use it."""
-    from sar_geo_mcp.terrain import evt
+    from sar_geo_mcp.sources import landfire as evt
 
     cache = tmp_path / "cache"
     tile = evt.fetch_tile(3, 7, cache, get_bytes=lambda url: TIFF_MAGIC_LE + b"\x00" * 64)
@@ -165,7 +165,7 @@ def test_a_fetched_evt_tile_lands_in_the_index(tmp_path):
 
 
 def test_a_cache_hit_touches_rather_than_re_records(tmp_path):
-    from sar_geo_mcp.terrain import evt
+    from sar_geo_mcp.sources import landfire as evt
 
     cache = tmp_path / "cache"
 

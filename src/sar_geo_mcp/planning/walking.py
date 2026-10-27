@@ -31,7 +31,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ..terrain.evt import codes_at_cells, lifeform_of
+from ..sources.landfire import lifeform_of
+from ..terrain.evt import codes_at_cells
 from ..terrain.movement import CLOSED_LIFEFORMS, DEFAULT, MovementModel
 from ..terrain.slope import slope_gradient
 from .egress import EGRESS_MAX_CELLS, _crossing_neighbourhoods, _way_masks

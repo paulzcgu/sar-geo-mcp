@@ -39,8 +39,48 @@ KIND_CLASS = {"raster": RasterSource, "features": FeatureSource,
 #: An area round a fixture point (tests/fixture_points.py).
 AREA = Area.around(37.4244, -122.3151, 400.0)
 
+class FakeTransport:
+    """Answers every request from canned bodies, and records the URLs."""
+
+    def __init__(self, *, body: bytes = b"", json_body=None):
+        self.body, self.json_body, self.urls = body, json_body, []
+
+    def get_bytes(self, url: str) -> bytes:
+        self.urls.append(url)
+        return self.body
+
+    def get_json(self, url: str, params=None):
+        self.urls.append(url)
+        return self.json_body
+
+    def post_json(self, url: str, data):
+        self.urls.append(url)
+        return self.json_body
+
+
+def _usgs_3dep(tmp_path: Path):
+    from test_dem import synthetic_tile_bytes
+
+    from sar_geo_mcp.sources.dem import Usgs3depSource
+
+    source = Usgs3depSource(tmp_path, transport=FakeTransport(body=synthetic_tile_bytes()))
+    return source.fetch(AREA, 64, 64)
+
+
+def _landfire_evt(tmp_path: Path):
+    from test_evt import fake_tile_bytes
+
+    from sar_geo_mcp.sources.landfire import LandfireEvtSource
+
+    source = LandfireEvtSource(tmp_path, transport=FakeTransport(body=fake_tile_bytes()))
+    return source.fetch(AREA)
+
+
 #: name -> run the source once against a fake network; returns its result.
-FAKE_CALLS: dict[str, Callable[[Path], object]] = {}
+FAKE_CALLS: dict[str, Callable[[Path], object]] = {
+    "usgs_3dep": _usgs_3dep,
+    "landfire_evt": _landfire_evt,
+}
 
 CLASSES = sources.source_classes()
 

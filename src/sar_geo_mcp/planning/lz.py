@@ -766,7 +766,8 @@ def _closed_water(directory: Path, grid, osm: dict | None
     from shapely.geometry import Polygon
     from shapely.geometry import shape as shapely_shape
 
-    from ..terrain.evt import codes_at_cells, lifeform_of
+    from ..sources.landfire import lifeform_of
+    from ..terrain.evt import codes_at_cells
     from ..terrain.movement import CLOSED_LIFEFORMS
 
     shape = grid.elevation.shape

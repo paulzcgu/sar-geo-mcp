@@ -6,17 +6,17 @@ import rasterio
 from rasterio.transform import from_origin
 from shapely.geometry import box
 
-from sar_geo_mcp.terrain.evt import (
+from sar_geo_mcp.sources.landfire import (
     EVT_PIXEL_M,
     EVT_TILE_M,
     EVT_TILE_PX,
     build_tile_url,
-    composition,
     load_lifeform_table,
     tile_bounds,
     tiles_covering,
     write_evt_clip,
 )
+from sar_geo_mcp.terrain.evt import composition
 
 # Assignment XI, and a neighbour ~400 m away — both inside one tile.
 BBOX = (-13606608.2, 4490700.1, -13605941.3, 4491434.5)

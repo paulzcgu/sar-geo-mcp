@@ -108,7 +108,8 @@ def cover_for_mask(evt_path: Path, grid, mask: np.ndarray) -> dict[str, Any] | N
     So the EVT raster is sampled at the mask's own cells, through
     `evt.codes_at_cells` - the one place a DEM cell meets its EVT pixel.
     """
-    from ..terrain.evt import codes_at_cells, load_lifeform_table
+    from ..sources.landfire import load_lifeform_table
+    from ..terrain.evt import codes_at_cells
 
     if not mask.any():
         return None

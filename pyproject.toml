@@ -1302,13 +1302,13 @@ sar-geo-mcp = "sar_geo_mcp.server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-# The LANDFIRE vegetation lookup ships with the code. Learned the hard way
+# The LANDFIRE vegetation lookup (sources/data) ships with the code. Learned the hard way
 # in an earlier project: an editable install reads straight from src/, so a
 # missing package-data entry stays invisible until a real wheel is built
 # and something fails at runtime.
 # The assignment-anatomy norms (planning/norms.py) ship the same way, for
 # the same reason.
-sar_geo_mcp = ["terrain/data/*.csv", "planning/data/*.json"]
+sar_geo_mcp = ["sources/data/*.csv", "planning/data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
