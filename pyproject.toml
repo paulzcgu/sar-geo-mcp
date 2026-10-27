@@ -1,0 +1,1235 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sar-geo-mcp"
+# Bumped when the surface consumers depend on changes. The app pins a
+# floor against this, so an out-of-date sibling checkout fails at install
+# with a resolver message rather than at runtime with an ImportError.
+# 0.4.0 is planning phase 1: area handles, the ridge kind, the OSM barrier
+# and water-edge classes, the norms file, and describe_boundary. 0.5.0 is
+# planning phase 2: hasty candidates, get_candidate, per-candidate effort;
+# describe_boundary takes a candidate id. 0.5.1 adds Tile.from_slippy, so a
+# tile proxy can translate a Leaflet z/x/y address onto the hub's grid.
+# 0.5.2: from_slippy bounds the level.
+# 0.5.3: unique temp files in tile and panel writes.
+# 0.5.4: Overpass retries, mirrors and an honest failure.
+# 0.6.0: travel time from the centre on every candidate; min_length_m.
+# 0.7.0: a named way is one candidate, drawn to its ends - one line
+# candidate per class, name and connected component, its length_m the total
+# inside the area, its geometry a MultiLineString when it forks, and a new
+# facts.branches counting the pieces.
+# 0.8.0: line candidates run to the edge of the measured ground, not the
+# search circle - a line's length_m and geometry cover the staged raster (the
+# area plus a 1,000 m planning buffer, up from 500 m), a new
+# facts.clipped_at_edge says when the way carries on past that ground, and the
+# buffer is part of the area handle so a directory staged with the old one is
+# never re-used at the smaller size. Corridors still clip to the subject area.
+# 0.8.1: clipped_at_edge is also true when a way ENDS on the raster boundary.
+# The staged osm.json is already cut to the staging box, so on a real staging
+# a length comparison alone flagged nothing - not even a road running tens of
+# kilometres past the ground. Found by a live check against v0.8.0, which
+# nothing but this repository's own tag consumed.
+# 0.8.2: every cache writer uses a unique temp file. The temp name used to
+# be derived from the destination, so two threads writing one cache key
+# wrote the same `.part` path: an operator got a PermissionError on the
+# FIRST click of every session - the PLS echo and the staging thread both
+# caching the same map onto `TESTMAP.json.part` - and success on the
+# second, once the cache was warm. `caltopo/wms.py` had solved this for
+# tiles in 0.5.3; that fix now lives in `cache.atomic` and all seven
+# writers use it. No caller's behaviour changes.
+# 0.9.0: `buffer_geometry`, a stateless tool that widens a line into the
+# polygon CalTopo's Buffer draws - `distance_m` ground metres each side,
+# round ends. The planning agent exports a line search as such a ribbon
+# (15 m each side, which is CalTopo's default and what every line search
+# on real team maps measures), and it holds no geometry maths of its
+# own, so the buffer lives here. New tool only; nothing existing changes.
+# 0.10.0: `buffer_geometry(single_ring=True)` draws a ribbon that encloses
+# ground as ONE ring per polygon, the holes cut open along zero-width
+# bridges. Found by the first live CalTopo import: a loop trail
+# closes into a loop, its buffer is a donut, and CalTopo carries one ring
+# per polygon - it dropped the hole and imported an 8.36 ha area of
+# hillside where a 4.91 ha corridor was planned. The area is measured
+# before the cut and does not change; the default is off, because a
+# self-touching ring is invalid to everything except the one-ring model
+# that needs it. Nothing existing changes.
+# 0.15.0: `prepare_area(...)["osm_available"]`, a FIELD saying whether
+# OpenStreetMap could be read, so the app stops inferring it by matching
+# warning prose against a hub constant - a comparison that silently stopped
+# being true whenever the warning was reworded. Also the Overpass mirror
+# list stops claiming a depth it never had: `overpass.kumi.systems` was a
+# CNAME of `overpass.private.coffee`, so three names were two machines, and
+# a hung host could spend a whole 90 s budget under both of its names while
+# the one working mirror sat untried. The budget is now shared across the
+# mirrors not yet tried, and a timeout abandons a host after one attempt
+# instead of three. Callers gain a field; nothing existing changes.
+# 0.16.0: `lz_candidates`, where a helicopter can put down - open, flat
+# patches on staged ground graded preferred, minimal or marginal the way
+# the CalTopo First Response safety course grades a landing zone, each
+# pocket on its own ground, with the nearest power line (or "unknown",
+# never a silent null), an imagery chip per candidate named by its ground,
+# and no aspect or bearing where the ground has none. Staged route records
+# gain a `power` property so a wire can be told from a fence; a record
+# without the key predates the field and reads as unknown. The canopy
+# panel is fetched through the WMS path when an area handle lacks it, and
+# refused when it cannot be. Callers gain a tool and a field; nothing
+# existing changes.
+# 0.17.0: `lz_candidates` closes ground before any circle is fitted, not
+# just reports it after - within 30 m of a structure CalTopo has mapped
+# (`structure_clearance_m`, on CalTopo's `structures` layer: footprints are
+# drawn semi-transparent, alpha 64 to 127, never opaque, so the alpha
+# threshold is 32, not 128) and within 60 m of any mapped power line, now
+# including distribution lines (`powerline_clearance_m`; OSM query version
+# 4 asks for `power=minor_line` as well as `power=line`, and every cached
+# tile is fetched again once to pick them up). A structures layer that
+# cannot be had is a warning, not a refusal - the filter is lost, not the
+# grade. The imagery chip becomes a list, one per source that could be had:
+# CalTopo imagery and NAIP as before, then Mapbox and Google static
+# satellite images when the server is configured with their keys
+# (`ZA_MAPBOX_TOKEN`, `ZA_GOOGLE_MAPS_KEY`); `chip_path` still names the
+# first. httpx's own request logging is quieted on import, because a
+# CalTopo GetMap URL carries the account token in its path and a Mapbox or
+# Google static-image URL carries its key in the query string, and an INFO
+# line is a published credential. `shaded_relief` and `slope_shading`
+# carry the same fix on their own CalTopo panel fetch: a failed fetch is
+# now a warning naming the exception type and, for an HTTP error, its
+# status - never the message, which is the URL and the token in it.
+# Callers gain parameters and fields; `chip_path` still names the first
+# chip. One field goes: `assumptions.chip.layer`, since chips no longer come
+# from one layer - `assumptions.chip.sources` lists the sources asked, and
+# each candidate's `chips` list says which chips exist.
+# 0.17.1: warnings a planner now reads on the app's Safety page. An
+# "osm unavailable" outage recorded at staging is no longer returned once a
+# top-up has written an osm.json (`osm_refreshed_versions`), at any version
+# (a file that is merely behind is reported by the top-up's own warnings);
+# a successful top-up moves it to a new manifest list,
+# `osm_retired_warnings`, that only grows, so the staleness stamp still
+# always changes. An outage beside a file no top-up wrote stands in an
+# assignment directory (its boundary can move), not in an area's. "Exists"
+# is made to mean "fetched for this ground": a re-stage that cannot reach
+# Overpass keeps the earlier osm.json only for the same bbox, with a new
+# kept-file warning in that staging's response in place of the outage, and
+# removes one fetched for another bbox. An unparseable osm.json is fetched
+# again instead of failing prepare_area, and removed when it cannot be; a
+# removal that fails raises without the path. No warning carries a
+# path, a URL or a credential: an OSM failure names the exception type
+# (and an HTTP error's status) through `net_errors.safe_reason`; only
+# OverpassUnavailable keeps its hub-written sentence, which names the last
+# host alone. Endpoints are reported as host[:port] everywhere, including
+# `assumptions.overpass_endpoints` on a routes result, which changes from
+# URLs to hosts. New in `staging`: OSM_UNAVAILABLE, osm_outage_warning,
+# is_osm_outage_warning, OSM_REFETCH_FAILED, osm_kept_warning,
+# is_osm_kept_warning, manifest_warnings; in `terrain.linear`:
+# reported_endpoints.
+# 0.18.0: a new tool, `egress_routes` - the quickest exit a 2WD vehicle can
+# reach and the quickest a 4x4 can, from a location, on foot (`walk_out`) or
+# by litter (`carry_out`), by least walking time that counts the climb
+# (Tobler on the signed grade, faster on mapped ways, a litter's 40 % grade
+# limit), both kinds always returned, each with its route, minutes,
+# distance, climb, descent, and the road, lot and gates it ends on; gates
+# and access are said, never excluded, and the minutes are a rank, not a
+# promise. `lz_candidates` gains `road` (the nearest road, track or other
+# vehicle way within the notice distance, `on_road` when it comes within the
+# clear circle - "within the whole clearing"), `parking_lot` and
+# `assumptions.road_class`; its missing-OSM warning gains a sentence, the
+# first kept word for word. OSM query version 5 keeps `highway`, `access`
+# and `tracktype` on every route and fetches gates into a `gates` list, so
+# every cached tile and every staged area is fetched once more on its next
+# staging, and a top-up names every group an old file lacks. Callers gain a
+# tool and fields; no field is removed or renamed. Wording changes: the
+# warnings said above; a staged directory's grid errors now name the missing
+# or unreadable file and never its local path (a corrupt manifest or subject
+# file raises OSError where it raised ValueError; every hub caller catches
+# both); and a stored `power` tag is lowercased like the other way tags.
+# 0.18.1: three tools that could not run over MCP alone now can. Nothing
+# in this package wrote `terrain_metrics.json`, the file `slope_stats`,
+# `elevation_profile` and `coverage_for` read - only the debrief app did -
+# so `terrain_metrics` now saves what it computed beside the staged ground,
+# and `stage_terrain` and a successful `refresh_osm` remove it (new:
+# `staging.discard_terrain_metrics`), since metrics measured from the old
+# polygon or the old osm.json would answer for ground that has gone.
+# `coverage_for` crashed on every real call ("'CoverageResult' object is
+# not iterable") and now returns the `CoverageMetrics` digest, never the
+# track geometry. Wording: the missing-metrics errors and the line-coverage
+# fallback warning name the `terrain_metrics` tool first and still name
+# the debrief app's own command. No field is removed.
+# 0.19.0: a new tool, `populated_areas` - urban and suburban search blocks
+# read off CalTopo's parcel layer (new WMS layer `parcel`, resampled with
+# MAX_ALPHA like `structures`): built-up lots, at most an acre, grouped by
+# the OpenStreetMap street they front into one block per street (both sides
+# and the street between), plus one block per big lot that is mostly roof.
+# Saved as a candidate set of a new kind, `block`; `get_candidate` returns
+# the polygon. Opt-in `building_markers` adds one CalTopo house marker
+# (`hut`, white by default, `marker_color` to change it) per building,
+# returned with the block by `get_candidate`; `Candidate` gains an optional
+# `markers` field, left out of summaries and out of `get_candidate` for
+# every candidate that has none. Callers gain a tool; nothing existing
+# changes.
+# 0.20.0: urban search, end to end. Two new tools: `urban_assignments`
+# merges populated blocks into assignments of about one size (the corpus
+# median for `resource_type`, 10 ha for GROUND, or `target_ha`), never
+# across an OSM arterial, small groups pairing across water two at most -
+# saved as a candidate set of a new kind, `assignment`; and
+# `caltopo_export`, which writes any candidate set as a GeoJSON file CalTopo
+# imports as DRAFT assignments (multi-part candidates split, holes cut open,
+# the search area and house markers included) - a file beside the staged
+# ground, never a write to CalTopo. `prepare_area` takes `radius` with
+# `radius_unit` (m, km, ft, yd, mi) beside `radius_m`, the same ground under
+# the same handle whichever names it, and returns the area's outline as
+# `area`. `convert_coordinate` gains `degrees_minutes_seconds`; new
+# `coords.format_dms`. `populated_areas` FIXES: no two blocks share ground
+# (the street two closings both reached was drawn into both; nearest the
+# centre now keeps it) and every block is one polygon (a run another
+# block's lots cut in two was one MultiPolygon; it is now two blocks, each
+# with its own lots and a warning) - so block counts, names' run numbers
+# and areas change slightly on ground where either happened. Callers gain
+# two tools and fields; no field is removed.
+# 0.21.0: a new tool, `travel_time_rings` - rings of equal walking time
+# round a place last seen, the travel-time counterpart of a radius circle.
+# One solve of egress's walking graph outward from the location, cut at each
+# time asked for: Tobler on the signed grade; off a way, Tobler's 0.6 times a
+# LANDFIRE lifeform factor (brush slowest); a fixed time to get into a creek;
+# rivers, shores and open water closed but at a mapped crossing; ground over
+# the cliff slope closed off a way. Each ring carries its polygon, outline,
+# area, equal-area radius and reach in eight directions - each with the
+# quickest route there, its minutes on and off trail, the trail walked and
+# where it was left - and says when the staged edge cuts it. `egress_graph.build_graph` gains two optional
+# arguments (`off_way_scale`, `crossing` with `crossing_minutes`); egress
+# passes neither and is unchanged. Route records gain `waterway` and
+# `tunnel` (always written, null where absent; no query change - `out geom`
+# already returned them); a record without them was staged earlier. Callers
+# gain a tool and two route fields.
+# Also in 0.21.0, ONE MOVEMENT MODEL: every walking number now lives in
+# `terrain.movement` (Tobler, on-way 1.0, off-way 0.6, the LANDFIRE lifeform
+# factors, the 45-degree impassable slope, the creek minutes), and every
+# tool reads it there; vegetation slows a walker by TYPE, and canopy density
+# (operator's ruling, 2026-10-20) narrows sweep width but no longer changes
+# speed. New: `terrain.movement`, `planning.walking` (the walking ground the
+# rings and hasty travel minutes share), `slope.slope_gradient`,
+# `evt.codes_at_cells` and `evt.lifeform_of`. NUMBERS A CALLER SEES CHANGE:
+# a hasty LINE candidate's `effort.rate_kmh` is Tobler at the on-way factor
+# (was x0.8 for an assumed moderate density), so its hours fall by a fifth;
+# a CORRIDOR's rate - and the debrief `terrain_metrics` traverse
+# `vegetation_adjusted_rate_kmh` - is Tobler x 0.6 x the area-weighted
+# lifeform factor (was x the density factor), so sweep times rise, most in
+# brush; `travel_minutes_from_center` is the shared walk's (signed grade,
+# trails, vegetation, water, closures - was cross-country Tobler with none
+# of them), and is null with a warning on ground over 1,800 x 1,800 cells.
+# Assumption shapes: `traverse.ASSUMPTIONS` loses `speed_factor_by_density`
+# and gains `off_way_factor`, `speed_factor_by_lifeform` and
+# `movement_model`; `assumptions.travel` is the walking rules plus a
+# `movement` block (its `dem_void_m` and `tobler` keys become `dem_void` and
+# `movement.tobler`); `assumptions.effort` and each candidate's shared
+# effort assumptions gain `movement`; `travel_time_rings`' factors move under
+# `assumptions.movement`. `site_facts` reads vegetation through the shared
+# sampler: a cell centre exactly on the EVT raster's edge is now counted the
+# way `floor` places it. `egress_routes` walk-out walks the same shared
+# ground (vegetation, creeks, rivers, shores, open water, steep-ground
+# closure; an exit's cells never closed), so walk-out minutes and routes
+# change - slower and more on-trail through timber and brush, and an exit
+# across an unbridged river is unreachable, its reason naming the water;
+# walk-out results gain `assumptions.walking`, `assumptions.ground`, and
+# the walking ground's warnings (no LANDFIRE, waterway kinds unknown).
+# Carry-out keeps its litter factors and grade limit over ways alone and
+# is unchanged but for the new `assumptions.ground` sentence. No fact field
+# is removed; only assumption keys move.
+# 0.22.0: a new tool, `nearest_medical_facilities` - the closest medical
+# center, trauma center and pediatric trauma center to a point, each
+# category ranked by ROAD time (OSRM), with a Markdown table of trauma level,
+# helipad Y/N/unknown, road distance and time, air time where there is a
+# helipad (straight line at 240 km/h plus 5 minutes), phone and address,
+# and GeoJSON markers to draw. Hospitals from HIFLD (FEMA's copy; HIFLD Open
+# is retired), helipads cross-checked against OpenStreetMap, campuses listed
+# twice merged, and a children's hospital never counted as an adult trauma
+# center. Stateless; two new optional settings, `ZA_HOSPITALS_URL` and
+# `ZA_OSRM_URL`. Callers gain a tool; nothing existing changes.
+# 0.22.1: staging asks Overpass for up to sixteen OSM tiles in ONE request
+# instead of one request per tile. The wait on overpass-api.de is per
+# request (a trivial query took 36 s on 2026-10-21), so a six-tile staging
+# that sat through six waits now sits through one. Each tile is still cached
+# in its own file, split back out by marker elements, so cache keys and
+# results - route ids included - are unchanged. An answer Overpass marks as
+# a runtime error, or one that does not hold every tile once, is refused
+# rather than cached as complete. Nothing a caller reads changes.
+# 0.23.0: `nearest_medical_facilities` fixes two things found in a live run.
+# Its `markers` now import into CalTopo as Markers - `class`, `title`, a
+# `description` holding the hospital's table row (categories and ranks,
+# trauma, helipad, road and air time, phone, address, validation date),
+# `marker-symbol` (`firstaid` red for a hospital, `point` blue for the
+# point) and `marker-color`; before, CalTopo drew bare black dots with empty
+# descriptions. `role`, `categories` and the other properties stay. And a
+# point outside the US is now said to be: HIFLD is US-only, and downtown
+# Vancouver was told its nearest trauma center was Bellingham, 87 km off. A
+# new field `point.in_us` (true, false, or null when the check failed) and
+# `point.us_state`, from the Census TIGERweb States layer - one more public
+# call, overridable with the new optional `ZA_US_STATES_URL` - and a first
+# warning when the point is in another country or offshore. A failed lookup
+# is a warning. `assumptions.coverage` names the source. Nothing removed.
+# 0.24.0: `lz_candidates` closes open water before fitting. A lake is flat
+# and reads as bare on the canopy proxy, so a live run at an alpine lake
+# graded the lake itself "preferred", 727 m across. Water is now closed
+# from LANDFIRE open water (`evt.tif`, 30 m, so a little shore may close
+# with it) and from OpenStreetMap lake, reservoir and coast shorelines, a
+# closed ring filled; dry shore is still graded on its own. New
+# `assumptions.water_sources_checked` ("landfire_open_water",
+# "osm_shorelines"), and a warning when evt.tif cannot be read or neither
+# source can. Candidates on water disappear; nothing is removed.
+# 0.25.0: trees from true-colour imagery, as a shared building block
+# (`terrain.trees`): `detect_trees` on any image (crowns, shadows, both) and
+# `trees_on_grid`, the share of each staged cell that is tree or tree shadow
+# from CalTopo's NAIP true colour (`n3`) at about 1 m. A shadow is dark and
+# not green against its 60 m surroundings, or very dark at any colour; a
+# crown is green within 6 m of one, so a wet meadow - as green as a pine but
+# shadowless - stays open. `lz_candidates` closes every cell holding a tree
+# or its shadow before fitting, with no speck rule: a live run offered a
+# 50 m circle with a dozen pines in it, which the CIR proxy read as 3 %
+# canopy and its speck rule fitted over. New `assumptions.trees` ("checked"
+# / "not checked") and `assumptions.trees_method`; without a WMS token or
+# when the imagery fails it is a warning, never a refusal. Fewer, cleaner
+# candidates in timber; nothing removed.
+# 0.26.0: a new tool, `unmarked_paths` - roads and trails on staged ground
+# that OpenStreetMap has not got, from the Forest Service road (open and
+# closed) and trail inventories, BLM GTLF, the National Map's trails, 4WD
+# and closed roads, and DEM benches, fused into one ranked list. Agreement
+# is counted by lineage, so a USGS copy of a Forest Service trail is one
+# sighting. Written to `exports/unmarked-paths.geojson` for a planner to
+# import into CalTopo as line Shapes - a file, never a write. Callers gain
+# a tool. Also in 0.26.0, the DEM lineaments `shaded_relief` and
+# `unmarked_paths` both read no longer drop a component that traces too
+# winding along one axis - a road with spurs, a hairpin: it is split into
+# its centreline branches at every junction, each judged on its own, and
+# every lineament says `traced_by` "axis" or "centreline". On real ground
+# this recovered a 1 km road network that was being dropped whole.
+# scikit-image is declared for the skeleton; it was already installed, as
+# a requirement of pysheds. Centreline arms that carry straight through a
+# junction are joined back into one line; a bench that is mostly a mapped
+# way now offers its unmapped stretches (`clipped_from_m`, `mapped_share`)
+# instead of being dropped whole; and the CalTopo file holds every
+# candidate by default (`geojson_limit`), not only the `limit` returned.
+# Two more: NAIP aerial imagery (USGS National Map, public) is a source of
+# its own - a line on a corridor barer than the ground either side gains an
+# independent "imagery" sighting - and line ends are bridged to the nearest
+# line or mapped way within 40 m along flat ground, where the bench fades
+# at junctions; bridges are listed apart and drawn green.
+# 0.27.0: the tools are split into three layers - components, features and
+# scenarios - each a package with `register(mcp, ctx)` (docs/ARCHITECTURE.md).
+# `server.py` now only builds a `ServerContext` (new `context.py`: the config,
+# the map reader, the norms, `state()` and `staged()`) and registers each
+# layer; `planning/tools.py` is gone, its wrappers moved word for word. Every
+# tool carries its layer as a FastMCP tag. Callers see the same 37 tools with
+# the same names, descriptions and schemas; only the tag is new. Tests now
+# walk every tool's globals and lazy imports, not only the planning ones, and
+# `tests/test_layering.py` enforces that imports point down the layers.
+# 0.27.1: infra no longer imports domain, so the layering test's list of
+# known exceptions is empty and forbids new ones. Which cached tiles staged
+# ground rests on is worked out by `staging.tiles_in_use` (moved from
+# `cache/evict.py`), and `plan_eviction`/`evict` now take those keys as a
+# required `protected=` argument; the `evict_cache` tool wires the two.
+# `find_assignment` moved from `caltopo/session.py` to
+# `caltopo/assignment.py`, with no re-export, so importing or patching it by
+# the old path now fails. The app still uses the old path and must switch to
+# `sar_geo_mcp.caltopo.assignment.find_assignment` when it upgrades: the
+# imports in `pipeline.py` and `cli.py`, its hub-contract test, and the
+# `monkeypatch.setattr` targets in `test_cli_run.py`, `test_ui_server.py`
+# and `test_ui_prepare.py` (on the old path these raise AttributeError
+# before the test runs). The unused `session._label_of` is gone. The 37
+# tools keep their names, descriptions, schemas and answers; no MCP caller
+# sees a change.
+# 0.27.2: every tool is a plain function first (rule 1 in
+# docs/ARCHITECTURE.md), so a scenario can call features and components
+# without MCP. Each tool's body moved, unchanged but for spelling out
+# `ctx.staged`, `ctx.config` and the like, into a module-level function of
+# the tool's own name in the same module, taking the `ServerContext` first
+# and then the tool's arguments, and returning the payload an MCP caller
+# gets - `sar_geo_mcp.features.lz.lz_candidates(ctx, handle, ...)`. The MCP
+# wrapper keeps the description and signature, is named `_<tool>_tool` in
+# the source and only calls the function. It is registered through the new
+# `context.mcp_tool`, which passes `name=` and renames the wrapper to the
+# tool's name, so an argument-validation error still says
+# `call[lz_candidates]`, not `call[_lz_candidates_tool]`. The tool layers
+# now import `context` for the type and for `mcp_tool`; the layering test
+# allows that for them alone, and now also refuses `context` importing
+# `server`. Callers see the same 37 tools with the same names, tags,
+# descriptions, schemas, answers and error wording, and the patch targets
+# tests use (`features.lz.lz_candidates_impl`, `context.resolve`) still
+# take effect. Two changes reach only a direct caller, since the MCP path
+# already behaved this way: `assignment_norms` returns a deep copy, so a
+# scenario changing its payload cannot change the server's norms, and
+# `planning.rasters.slope_shading` refuses an unknown `returns` with a
+# ValueError, as `shaded_relief` does, where it used to answer as for
+# "data". Not changed: any other tool's logic, any other domain or infra
+# module, `server.py`. The registration test now walks the plain functions
+# and the tool-layer helpers they call, nested code included, checks every
+# `ctx.<name>` they read, and checks every tool's shape: the signature, that
+# each argument reaches the parameter of its name, and the wrapper's name.
+# 0.28.0: the first scenario, `plan_medevac` (tag `scenario`): a patient at a
+# point, and in one call the landing zones nearest them, the 2WD and 4x4
+# exits on foot and by litter, and the nearest hospitals and trauma centers.
+# It stages two grounds centred on the patient through `prepare_area` - 1,000 m
+# at 2 m for `lz_candidates`, 3,000 m at 10 m for `egress_routes` - and calls
+# those two and `nearest_medical_facilities` as plain functions. It answers in
+# sections, each with its own `status`, `error`, `warnings`, compact facts
+# (points, never outlines or routes) and the exact `detail_call` that returns
+# the full answer, kept on a section whose call raised; overall `status` is
+# ok, partial or failed - failed only when nothing answered, so an egress with
+# one mode back reads partial - and a section that fails (a staging, a
+# lookup) never stops the others. `summary` holds the top-line facts -
+# nearest landing zone of any grade and nearest preferred (or, when the
+# limit left every preferred zone out, how many and the call that lists
+# them), quickest exit per mode, nearest trauma center - and no verdict. One
+# CalTopo-importable GeoJSON (patient, landing zones, routes, hospitals) is
+# written to `exports/medevac.geojson` beside the staged ground, each marker
+# saying what was not checked there; nothing is sent to CalTopo. `include`
+# and `overrides` select sections and pass feature keywords, and bad ones
+# are refused before any work: a radius exactly as `prepare_area` would
+# refuse it (so 4,500 m, a hair over its 9,000 m across, is refused up
+# front), a keyword a helper always sets, and an egress keyword whose
+# default differs by mode while both modes run. The machinery every later
+# scenario reuses - section status, those refusals, staging each ground
+# once, the export, and one helper each for landing zones, egress, medical
+# and parking - is in the new `scenarios/_sections.py`; docs/ARCHITECTURE.md
+# describes it, and README lists the tool. Callers gain a tool; the 37
+# existing tools keep byte-identical descriptions and input and output
+# schemas, and no feature, component, domain or infra module changed.
+# 0.29.0: the second scenario, `plan_initial_response` (tag `scenario`): the
+# first operational period of a wilderness search from a place last seen, in
+# one call - the hasty lines a team can run (`hasty_candidates`, 20 nearest by
+# default), the nearest parking (`parking_candidates`), walking-time rings
+# (`travel_time_rings`, 15, 30 and 60 minutes), the landing zones nearest the
+# place (`lz_candidates`) and the nearest hospitals
+# (`nearest_medical_facilities`), each a compact section with its own status
+# and `detail_call`, and an `export` section that writes the hasty set as
+# DRAFT CalTopo assignments through the `caltopo_export` component, with
+# everything else found (the place, parking, ring outlines, landing zones,
+# hospitals) in a second file, `exports/initial_response.geojson`. It stages
+# up to three grounds centred on the place: the search area (`radius` with
+# `radius_unit`, or `radius_m`; default 1,500 m) at the default raster, the
+# rings' ground at 10 m sized for the longest ring by the rings tool's own
+# rule on the model's quickest ground and capped at 4,499 m, and 1,000 m at
+# 2 m for the landing zones - plan_medevac's default, so the two share it.
+# `summary` holds counts per hasty kind and axis, the nearest parking, each
+# ring's area and reach, the nearest landing zones and the nearest trauma
+# center, and no verdict. The export never fails: every way it can draw
+# nothing (hasty left out or failed, caltopo_export raising, a full disk, no
+# ground to write beside) is a warning on its section, and the overall status
+# leaves the export section out, so a full disk never reads as "partial";
+# `include` naming only export is refused. Refused before any work, beside
+# what plan_medevac refuses: bad ring times, a negative limit, a hasty
+# `corridor_widths_m` override that is not one (a misspelt class included,
+# which the model would silently ignore), a rings walking-model override the
+# rings tool would refuse, an export `label_prefix` caltopo_export would
+# refuse, and the export's own handle and set. `scenarios/_sections.py` gains
+# the helpers for hasty, rings and the candidate-set export, those checks and
+# the summary facts; `overall_status` leaves an `export` section out (none
+# existed before), and the parking marker names its point; plan_medevac now
+# uses the shared resolution constants, limit checks and facts instead of its
+# own copies, with the same answers, wording and schema. Domain changes:
+# `planning.travel_rings` makes its ring-time check public as `minutes_list`
+# (it was `_minutes_list`), its radius rule `radius_to_fit` (with
+# `reach_bound_m`) and its model `rings_model`, adds `fastest_factor` and
+# `LARGEST_RADIUS_M`, and fixes three edge-warning bugs: for a 52.6-55
+# minute ring it named radius_m=4,500, which prepare_area refuses (now 4,499,
+# or "cannot be drawn whole" past it, which now says 4,499 m reaching 5,499 m
+# rather than 4,500 and 5,500); with an off_way_factor or vegetation_factors
+# override that made open ground quicker than a trail it named too small a
+# radius and a false "no one walks farther than"; and an absurd time or
+# speed_factor raised OverflowError instead of saying none fits. Other ring
+# answers and wording are unchanged. `planning.export` makes its label-prefix
+# rule public as `check_label_prefix` (same words), and no longer raises on a
+# candidate whose bearing from the centre is null - a hasty line through the
+# centre, as a trail is when the place last seen is its trailhead - which
+# made `caltopo_export` fail for the whole set with a TypeError; it now says
+# "0 m from the centre." with no bearing. Callers gain a tool; the 37
+# original tools and plan_medevac keep byte-identical descriptions and input
+# and output schemas, caltopo_export now exports such a set, and
+# travel_time_rings' edge advice is right in the cases above. No other
+# feature, component or infra module changed.
+# 0.30.0: the third scenario, `plan_urban_search` (tag `scenario`): an urban
+# or suburban search round a place last seen, in one call - the populated
+# blocks grouped into assignments of about one size (the `urban` section:
+# `populated_areas`, then `urban_assignments`, both keeping the blocks of
+# the search circle), the nearest parking (`parking_candidates`) and the
+# nearest hospitals (`nearest_medical_facilities`), each a compact section
+# with its own status and `detail_call`, and an `export` section that writes
+# the assignments as DRAFT CalTopo assignments through `caltopo_export` - in
+# the scenario's `resource_type`, with house markers exactly when
+# `building_markers` asked for them - and the place, parking and hospitals
+# to `exports/urban_search.geojson`. It stages one ground at the default
+# raster, `radius` with `radius_unit` or `radius_m`, default half a mile.
+# Without the CalTopo WMS token the urban section fails in populated_areas'
+# own words and the rest still answer. `summary` holds the assignment count,
+# target and size spread, total area, lots and buildings, the nearest
+# parking and the nearest trauma center, and no verdict. The urban section
+# calls two features, so its overrides go by tool, `{"urban":
+# {"populated_areas": {...}, "urban_assignments": {...}}}`, and a block rule
+# given to populated_areas alone - urban_assignments takes none but
+# `max_distance_m` - is said on the section, since the blocks counted are
+# then not the ones grouped. The section also says when a `max_distance_m`
+# override reaches past the search radius (lot lines are read over the
+# staged circle only, so it adds at most blocks straddling the edge: a
+# wider search needs a larger radius), and when a house-marker colour given
+# to populated_areas is not the one the drafts take (urban_assignments').
+# When urban_assignments raises after the blocks were drawn, the section
+# fails but keeps `blocks`, and `answered_in_part` reads it as partial, as
+# it does an egress whose other mode answered. A search radius under 50 m
+# is answered with a top-level warning that `radius` is read in metres
+# unless `radius_unit` says otherwise. Refused before any work, beside what
+# the other scenarios refuse: a flat urban overrides mapping, a `target_ha`
+# not above zero, a block rule out of range, a marker colour CalTopo cannot
+# read (null included), and a radius too wide to read lot lines over
+# (about 4,035 m, which prepare_area would still stage).
+# `scenarios/_sections.py` gains `urban_section` and `urban_facts`,
+# override checks by tool for a section that calls several features
+# (`SECTION_PARTS`; `FEATURE_KEYWORDS` is now keyed by tool, not section),
+# `set_export_section(settings=...)` for keywords a scenario sets from its
+# own arguments (spread after the overrides, so they win), and
+# `write_markers`, the second export file and its top-level warnings, moved
+# out of plan_initial_response, which now calls it with the same answers,
+# wording and schema. Domain changes: `planning.populated` makes its parameter
+# checks public as `check_params` (it was `_validate`; same words) and adds
+# `panel_pixel_m`, its width rule on its own, so a scenario refuses before
+# staging what it would refuse after; and `planning.urban.group_blocks` no
+# longer returns an empty outline for a group whose every block lies inside
+# a larger group's outline - found by this step's live run on ground staged
+# while Overpass was down, where lots grouped by adjacency alone made a
+# 132 ha block round a small one and `urban_assignments` raised "max()
+# iterable argument is empty". Such a group now joins the group drawn round
+# it, its blocks counted there, as the module's rule that shared ground
+# goes to the larger group says; any other grouping is unchanged. Callers
+# gain a tool; the 37 original tools, plan_medevac and
+# plan_initial_response keep byte-identical descriptions and input and
+# output schemas, and urban_assignments answers where it used to raise. No
+# other feature, component or infra module changed.
+# 0.31.0: the fourth and last planned scenario, `debrief_assignment` (tag
+# `scenario`): a team back from a CalTopo assignment, in one call. It stages
+# the assignment (`map_id`, `label`, `public`) with the `prepare_terrain`
+# component and answers three sections on its handle, in this order:
+# `metrics` (`terrain_metrics` - elevation, slope, aspect, landform, each
+# drainage's measurements, vegetation, walking rate and sweep width, the
+# OpenStreetMap routes counted by type and named, the ways in, and the
+# identified shapes counted by kind, with no outline), `coverage`
+# (`coverage_for` with `track_names` - the coverage numbers, each track's
+# summary, and each gap's size, the terrain shapes it leaves unsearched and
+# a WGS84 point inside it, projected back from the Web Mercator outline
+# coverage_for gives) and `features` (`identify_features` for `kinds`,
+# default steep_band, drainage and cliff_band: per kind the count, the shape
+# ids, the summary's single facts and the warnings). The metrics run first
+# because they save the sweep width an area's coverage reads: when they
+# fail, coverage of an area fails naming that failure (`DependencyFailed`);
+# left out of `include`, coverage reads the metrics an earlier call saved,
+# and with none saved an area's coverage fails saying to add "metrics" to
+# include; a line's runs either way, with a warning saying which width. An
+# assignment that cannot be staged fails every section with the reason.
+# Each tool's `staleness` block is said once, at the top level (the
+# latest), and a boundary that moved, or could not be checked, is warned
+# of for every section that answered, since all stand on one staged
+# ground. `summary` holds the ground's size, relief, slope, vegetation and
+# sweep width, the covered fraction, effort, gap count, total and largest
+# gap, and the count per feature kind, and no verdict. `exports` is always
+# empty: a debrief draws nothing new. Refused before the map is read: a
+# blank map id or label, track names that are not a list of names (or
+# none while coverage is asked for), an unknown feature kind, and any
+# override, since none of the three tools takes a keyword the scenario does
+# not set itself. `scenarios/_sections.py` gains `stage_assignment`,
+# `check_assignment`, `check_track_names`, `check_feature_kinds`,
+# `assignment_kind`, `saved_metrics`, `metrics_section`, `coverage_section`,
+# `features_section` and their facts, `gap_point`, `staleness_warnings`,
+# `DependencyFailed` and `Outcome.staleness`; `ground_handle` names an
+# assignment's ground by its label and map (an area's refusal reads as
+# before), and a refused override for a tool that takes none says there is
+# nothing to override rather than "it accepts []". Callers gain a tool; the
+# 37 original tools and the three earlier scenarios keep byte-identical
+# descriptions and input and output schemas, and no feature, component,
+# domain or infra module changed.
+# 0.31.1: the four scenarios aligned with one another and with the docs, after
+# a review of the whole branch. `scenarios/_sections.py` gains `summarise`,
+# the one `summary` builder every scenario now calls with its own `FACTS`
+# mapping (three scenarios had a copy each, and plan_medevac its own), with
+# `in_part` for a section read when it holds an answer in part;
+# `egress_facts`, plan_medevac's quickest exit per mode moved there beside
+# the other facts helpers; and `unused_overrides`, the "overrides[...] was
+# not used" warning all four built for themselves. plan_medevac names each
+# section's ground through a `SECTION_GROUND` mapping, as the others do.
+# Answers, warnings and their wording are unchanged. Descriptions change
+# for the four scenario tools only: plan_medevac's `handles` no longer
+# offers `elevation_profile` "along an exit" - it takes a drainage id from
+# terrain_metrics, not a route - and names egress_routes and
+# travel_time_rings on the exit ground instead, and now says a section
+# names its ground in `ground`; plan_initial_response says, as
+# plan_urban_search does, that `markers_path` is null with no warning when
+# nothing but the place last seen would be in it; and each scenario now
+# says what its echoed subject (`patient`, `place_last_seen` and
+# `radius_m`, `assignment`), its top-level `warnings` and its `note` are.
+# README counts forty-one tools, names the scenarios and the layer tags,
+# and points to the plain functions; docs/ARCHITECTURE.md no longer says
+# egress is used by more than one scenario, and describes `summarise` and
+# `unused_overrides`. Not changed: the 37 original tools' descriptions and
+# input and output schemas (byte-identical), every scenario's input and
+# output schema, and every feature, component, domain and infra module.
+# 0.31.2: the scenarios check what they are given as the tools they call
+# would. WHAT WAS WRONG: an override VALUE reached the feature function as
+# given - `overrides` is an untyped mapping, so no schema read it on the way
+# in - and a bad one (text for a number, a null slope, a hasty kind that is
+# not one, a zero `min_length_m`, a 1,000 km hospital search) failed its
+# section after the grounds were staged, often in Python's words; worse, a
+# "false" string for a flag was truthy, so `{"export": {"include_area":
+# "false"}}` drew the search area the caller left out, saying nothing, where
+# caltopo_export called directly reads the same JSON as false. `radius_unit`
+# beside `radius_m` was dropped, so `radius_m=2, radius_unit="km"` staged a
+# 2 m circle and answered "ok". plan_initial_response said nothing of a
+# search radius under 50 m (`radius=0.5`, half a mile with its unit left
+# out), whose near-empty hasty section reads as "no hasty lines here". An
+# urban `resource_type` the corpus has no median for (DOGS for DOG) was
+# sized by the median of every assignment yet labelled "corpus median for
+# DOGS", with no warning, and drafted as DOGS. WHAT CALLERS SEE NOW:
+# `check_overrides` reads every override value as the feature tool's own
+# schema does (pydantic adapters over the real functions' annotations): one
+# it converts is passed on converted - "6" as 6.0, "false" as False - in the
+# call and its `detail_call`, a whole number where a float goes kept as
+# written; one it refuses, or the feature's own range checks would refuse
+# (`hasty_params`; the checks of lz_candidates and
+# nearest_medical_facilities, moved unchanged into new pure `check_params`
+# in planning/lz.py and planning/medical.py; and a new `check_params` in
+# planning/egress.py running egress's own `_settings` for every mode), is
+# refused before anything is staged, naming the keyword. Stricter than the
+# schema in one way: a number that is not finite ("nan", "inf") is refused,
+# since NaN passes every range check and its section would answer "ok"
+# with nothing found. The keywords a scenario check already reads in the
+# domain's words (corridor widths, walking pace, label prefix, marker
+# colour) are left to it - their text read by the schema first, so a pace
+# of "0.5" is 0.5 - and a blank export `resource_type` is refused too.
+# `radius_in_metres` refuses a unit other than metres beside `radius_m`,
+# and an unknown unit even with no radius - in both scenarios and in
+# prepare_area, whose description already says to give one form. Every
+# scenario taking a `radius_unit` warns of a radius under 50 m through one
+# helper, `small_radius_warnings` (SMALL_RADIUS_M moves to _sections;
+# plan_urban_search's wording is unchanged). urban_assignments labels the
+# fallback "corpus median of every assignment (none for DOGS)" and warns,
+# naming the types the corpus knows, and a scenario's export section warns
+# when drafts carry such a type (`resource_type_warnings`). Descriptions
+# change for plan_medevac, plan_initial_response and plan_urban_search only,
+# to say how override values are read, the small-radius warning and the
+# resource-type fallback. NOT CHANGED: every tool's input and output
+# schema, the 37 original tools' descriptions, and what a valid call
+# answers - a known resource type, a radius of 50 m or more and good
+# override values give the same answer as before.
+# 0.31.3: a scenario's summary says "unknown", never "none", for a count
+# whose input was missing. WHAT WAS WRONG: a feature with no input answers
+# an empty list and a warning - parking_candidates and hasty_candidates on
+# ground staged during an OpenStreetMap outage (no osm.json), parking also
+# on ground fetched before it was asked for; identify_features' clearing
+# without a vegetation panel (every prepare_terrain ground), route and
+# ingress without osm.json. The sections kept the warning, but the summary
+# - the facts read first, beside no warning - copied the empty answer as a
+# none: parking `count` 0 with `nearest` null, documented as "none", and a
+# hasty `by_axis` with no trail or road key, both byte-identical to ground
+# where OpenStreetMap was read and maps nothing; a debrief's
+# summary.features counted the unknown kind 0 while summary.metrics, in
+# the same answer, gave the ways in as null. WHAT CALLERS SEE NOW: each
+# count the summary copies is null when its input was missing, in the
+# section and the summary alike. Parking: the section's
+# `total_before_limit`, and the summary's `count` and
+# `total_before_limit`, are null when no lots could be read (the feature's
+# missing-osm.json warning, or a `query_version` below 3). Hasty: on
+# ground with no osm.json each axis read from OpenStreetMap that was asked
+# for - trail, road, waterway - is null in `by_axis`; in `by_kind`, `line`
+# is null when trail or road was asked for, and `corridor` when waterway
+# was the only corridor axis asked for; `total_before_limit`, and the
+# summary's `count`, are null when no axis asked for could be read. The
+# axes from the elevation model keep their counts, and a hasty count that
+# read some axes counts those. Debrief: a kind whose input is missing has
+# `count` null in its section and in summary.features. Each detector now
+# declares the warnings it gives for a missing input
+# (`FeatureDetector.missing_input_warnings`; `terrain.features.
+# input_missing` reads them), so the scenario tells "unknown" from "none"
+# by the detector's own declaration, not by parsing prose. Descriptions
+# change for plan_initial_response, plan_urban_search and
+# debrief_assignment only, to say when these counts are null and why.
+# NOT CHANGED: every tool's input and output schema, the 37 original
+# tools' descriptions and answers (identify_features, parking_candidates
+# and hasty_candidates still give 0 beside their warning; list_feature_kinds
+# does not list the new declaration), the export files, every count
+# whose input was read - 0 there is still a real "none here" - and hasty's
+# `existing_assignments`, still 0 with no map read (PR #4 review B43).
+# 0.31.4: plan_medevac's CalTopo exit lines say the vehicle end. WHAT WAS
+# WRONG: a route line - all a field team reads of an exit in CalTopo - said
+# its minutes, "Exit on <road>" and a crossed-gate count above 0, and
+# nothing else of where the vehicle meets the team: not a gate on the exit
+# road itself, not a private road, not the lot an exit lies in or the road
+# it opens onto. On ground staged before gates were read it said nothing of
+# gates at all, though they are unknown there: for an exit in a lot with no
+# road beside it only the egress answer's own warnings say so, and the
+# line never heard them. A line silent about a gate reads as open.
+# summary.egress.<mode> gave the quickest exit's kind, minutes and distance
+# alone, so a gated private road read as one an ambulance can use. WHAT
+# CALLERS SEE NOW: each line names the exit road (an unnamed one by its
+# kind), or the lot and the road it opens onto (or says lots are unknown);
+# the road's OpenStreetMap access, or that it is not tagged, which does not
+# make it public; and always its gates: those crossed on the way, a gate on
+# the stretch of the exit road the exit lies on (the one OpenStreetMap way
+# `gate_on_road` was read for, within the staged ground) or none mapped
+# there - never "none on the road" - with the road in beyond that stretch,
+# or into a lot, said to be unchecked; or that gates (or road class, access
+# and gates) are unknown, never none, from the warnings `egress_section`
+# now hands each line. "0 gates" is never said. An exit at the patient
+# itself, which has no line, puts the same on the patient's marker.
+# summary.egress.<mode> adds the quickest exit's `road_name`,
+# `road_access`, `gate_on_road` and `parking_lot`, exactly as the section
+# gives them and with the section's nulls; its `gates_crossed` stays in the
+# section, beside the warning that says when it is unknown. The
+# plan_medevac description says all of it. NOT CHANGED: every tool's input
+# and output schema, the 37 original tools' descriptions and answers
+# (egress_routes included), the egress section's exits and warnings, and
+# each line's title, colour, geometry and which exits are drawn.
+# 0.31.5: one answer no longer contradicts itself on pace or on how the
+# hospitals were ranked. WHAT WAS WRONG: plan_initial_response passed a
+# `travel_rings` pace override (speed_factor, off_way_factor and the rest)
+# to the rings alone - hasty_candidates takes no pace - yet its description
+# called the hasty lines' travel_minutes_from_center minutes "on the rings'
+# own model": at speed_factor 0.5 a trail read 5.8 minutes away beside a
+# 12-minute ring that stopped short of it, and nothing said why (PR #4
+# review B14). And the medical tool's point marker always began "Nearest
+# hospitals ranked by road time from here." - with the road router down,
+# when every category is in straight-line order, and with no hospital drawn
+# at all - and the three scenarios that draw a CalTopo file carried the
+# line onto their Patient or Place last seen marker, beside hospitals
+# numbered "#1"; summary.medical.nearest_trauma_center was then the nearest
+# as the crow flies, its null road_minutes all that hinted at it (B21).
+# WHAT CALLERS SEE NOW: with hasty answered and the rings asked for on a
+# walking model other than the default, plan_initial_response's top-level
+# warnings say travel_minutes_from_center is walked on the default model,
+# naming the keywords and values; how to read the minutes at the rings'
+# pace when speed_factor is the only change, that the lines may come in
+# another order otherwise, and, with cliff_slope_deg, that a null minute
+# may be reached on the rings' walk or the reverse (`hasty_pace_warnings`);
+# an override that walks the default model anyway (speed_factor 1) says
+# nothing. The point marker - the standalone tool's and every scenario's -
+# says how the hospitals drawn were ranked: by road time; by road time
+# with an unrouted hospital after the routed ones; or by straight-line
+# distance, saying the road router could not be reached or found no road
+# to any, and that the nearest may not be the quickest by road. With no
+# hospital drawn it says nothing of ranking, so the standalone tool's
+# point then has an empty description. summary.medical.nearest_trauma_center
+# adds `ranked_by`, "road_time" or "straight_line". Descriptions change for
+# plan_initial_response (the hasty minutes' model, the new warning, and the
+# medical ranking's fallback and `ranked_by`), plan_medevac and
+# plan_urban_search (the medical ranking's fallback and `ranked_by`). NOT
+# CHANGED: every tool's input and output schema, the 37 original tools'
+# descriptions, every number in any answer, the hasty and rings sections,
+# the section warnings, and the marker text whenever at least one hospital
+# is drawn and every one was routed by road.
+# 0.31.6: an answer says when one of its CalTopo files is missing, and
+# when an earlier call's file sits where its own would be. WHAT WAS WRONG:
+# plan_initial_response and plan_urban_search write two files - the draft
+# assignments and a markers file (the place last seen, parking, rings,
+# landing zones, hospitals) - and said a missing one at the top level only
+# when neither was written. With caltopo_export raising, the answer was
+# "ok" with no top-level warning and `exports` holding the markers file
+# alone, so the hasty lines - in plan_urban_search the assignments, the
+# answer itself - were in no file; with the markers file refused, the
+# zones, hospitals and rings were in none. Its section warning read "the
+# CalTopo export could not be written", which beside the drafts' own
+# warning reads as both (PR #4 review B10). And the markers file has a
+# fixed name: a later call on the same ground that wrote none - only hasty
+# asked for, everything else failing, or a full disk - left the earlier
+# call's beside its fresh drafts with nothing said, rings walked for other
+# times and all, to be imported with the folder as this answer's (B9).
+# WHAT CALLERS SEE NOW: with one file written and the other not, one
+# top-level warning names the one missing - the draft assignments of the
+# set, or the markers file with the sections whose finds are in no file -
+# and never says nothing was found; the markers file's own section warning
+# names it ("the markers file initial_response.geojson could not be
+# written ..."), whether the drafts were written or not. When a call with
+# `export` in `include` writes no markers file and an earlier call's is
+# where it would have gone, a top-level warning gives its path as an
+# earlier call's, left as it was and not this answer's - also beside the
+# "no CalTopo export was written" and "nothing was found to draw"
+# warnings; plan_medevac's medevac.geojson the same. The file is named,
+# never removed: the earlier answer gave that path. Only that file: a call
+# with `export` left out names nothing, and an earlier call's drafts under
+# the same set id, left when caltopo_export raised, are not named - it can
+# raise after writing them, and this call's own would then be called an
+# earlier call's. A top-level warning that sends the planner to the export
+# section's reason names its `error` when that section itself raised,
+# not its empty `warnings`. Descriptions change for plan_initial_response,
+# plan_urban_search and plan_medevac to say so. NOT CHANGED: every tool's
+# input and output schema, the 37 original tools' descriptions and
+# answers, the status (an export still never turns "ok" into "partial"),
+# both files' names and contents, the drafts' own section warning, the
+# answer when both files were written, the one top-level warning's text
+# when neither was and the export section answered, and which files a
+# later call replaces.
+# 0.31.7: coverage says which lines it counted, or set aside, on a doubtful
+# name, and a name with no number matches only as a word. WHAT WAS WRONG:
+# with nothing plainly named for the team, track selection falls back to
+# lines whose names read as something else - a drone flight ("DRONE-UNIT
+# FLIGHT 3"), a probability ring ("50% (1.2mi) - Hiker") - and said so only
+# in the server log, which no caller reads: coverage_for answered with no
+# warning, and debrief_assignment "ok", with the covered fraction and gaps
+# of a drone sortie. A line like that set aside beside a plainly named
+# track was named in the log alone too, so if it was the team's its ground
+# went missing unsaid (PR #4 review B2). And a track name with no digits
+# matched as a bare substring: the assignment label "AB", an easy slip for
+# a track name, was a strong match on "Slab Trail (drawn)", and "A"
+# on nearly every title, so a drawn trail counted as the team's coverage
+# (B18). WHAT CALLERS SEE NOW: the coverage's `warnings` - in coverage_for's
+# answer and debrief_assignment's coverage section, first, an area's or a
+# line's - name the lines counted for want of a plainly named one, and the
+# lines set aside that reach the assignment (not ones elsewhere on the map,
+# which would not have counted), once each, with what in a name demotes it
+# (a unit after the number, or a word such as FLIGHT, OSM, Distribution or
+# a month, even inside a longer word: "Mar" in "104 Marker"); a coverage that
+# fails because the plainly named tracks miss the assignment names a
+# set-aside line that reaches it. A name with no number matches only as a
+# word of its own - "AB" finds "101 AB" and "AB-3", never "Slab" - and a
+# warning names the lines it alone chose, since an assignment's label can
+# name every team's lines on it. debrief_assignment's description and its
+# `note` say so. NOT CHANGED: every tool's input and output schema, the 37
+# original tools' descriptions, which tracks a team number selects, the
+# plainly named preference and its fallback, every number computed from
+# the tracks chosen, the server log's lines, the order of the other
+# coverage warnings, and the coverage warnings of team numbers whose every
+# matched line is plainly named, with none set aside that reaches the
+# assignment. A team with no line reaching the assignment is still not
+# warned of: `tracks` says whose lines were counted.
+# 0.31.8: an urban assignment's polygon holds the houses its counts hold.
+# WHAT WAS WRONG: 0.30.0 made a group whose every block lies inside a
+# larger group's outline join that group, but only when nothing at all was
+# left: a block standing in another block's slot, 2 m proud of its mouth,
+# came back as an assignment of its own drawn as the 2 x 14 m strip outside
+# - area_ha 0.0, a DRAFT for a team, carrying every parcel, building and
+# marker of the block - while 96 % of its ground and every house was drawn
+# inside the larger group's polygon and left out of its counts; flush with
+# the mouth it joined, so centimetres flipped it (PR #4 review B16). The
+# same cut drew part of any block a larger outline's closing reached in
+# that group's polygon while the block was counted in its own, and a block
+# hemmed by two groups was counted in one and drawn in the other (B33).
+# WHAT CALLERS SEE NOW: `group_blocks`, and so urban_assignments,
+# plan_urban_search's urban section and their CalTopo drafts, draw every
+# block wholly inside the assignment that counts it and no other. A group
+# more than half of whose block ground the larger groups' outlines reach,
+# together, joins the one reaching most of it (on a tie the larger),
+# counted and drawn there, the part proud of the mouth too; one half
+# reached or less keeps its blocks whole, the larger outline going round
+# them. No assignment is a sliver of no area carrying houses. A hemmed
+# group that was paired across water brings its partner, and the strip
+# only when the partner would otherwise be cut off - an isle across the
+# water: the host then counts that water link and carries its warning.
+# Two partners both inside the host's outline take no strip, as before. A
+# hemmed join is not held to the 140 % ceiling every merge keeps to - it
+# never was - and now joins more often: an assignment it carries past the
+# ceiling names the blocks in its warnings. A block under a square metre
+# is drawn in its own outline, not folded into the largest group. An
+# urban set already saved on staged ground is read back as it was
+# (`reused`) until the ground is staged again or the parameters change.
+# NOT CHANGED: every tool's input and output schema and description, the
+# merging and water-pairing rules before the outlines are drawn, the
+# street ground two outlines reach going to the larger group, a group
+# wholly hemmed joining the group drawn round it with the outline drawn as
+# before, and every grouping in which no outline reaches another group's
+# block - nearly every town.
+# 0.31.9: evict_cache holds the elevation tiles staged ground actually
+# rests on. WHAT WAS WRONG: `tiles_in_use` worked out each staged
+# directory's tiles at the level its extent takes with the default 1,024 px
+# raster, but ground staged at a chosen resolution can be fetched at
+# another level, and plan_medevac and plan_initial_response stage that way
+# on every call: the landing-zone ground at 2 m, egress and rings at 10 m.
+# Which ground lands on another level turns on its radius and latitude.
+# The default 1,000 m landing-zone ground does at nearly every latitude
+# (at 37.4 N it is fetched at level 16, where the default size gives 15).
+# At 37.4 N, 10 m ground does below about 2,700 m round (level 14, where
+# the default size gives 15 or 16): rings for shorter ring_minutes
+# ([15, 30] stage 2,000 m), or a smaller egress_radius_m. Egress at its
+# default 3,000 m and rings at their default 4,499 m share the default
+# level there, but not everywhere: egress differs south of 30 N and
+# between about 56.5 and 64.5 N, rings between about 53.5 and 56.5 N.
+# evict_cache with `execute` could delete every elevation tile under such
+# ground while reporting protected_by_staged_assignments 0, against its
+# promise that tiles staged assignments rest on are never removed. The
+# handle kept its own dem.tif, but a later re-stage of that ground on a
+# laptop with no signal failed (PR #4 review B3).
+# WHAT CALLERS SEE NOW: `stage_terrain` records in the manifest the raster
+# size it asked `fetch_dem` for (`dem_width_px`, `dem_height_px`), and
+# `tiles_in_use` holds the tiles at the level that size picked - for
+# assignments, prepare_area and every scenario alike - so evict_cache
+# neither offers nor removes them, and counts them in
+# protected_by_staged_assignments. A directory staged before this has the
+# size worked back from its `dem_resolution_m` and `latitude_deg`; over an
+# extent taller than wide that can hold a second, adjacent level as well
+# (about one such directory in 600), never one fewer. A recorded size no
+# staging could have asked for is ignored and the size worked back
+# instead. A manifest that gives neither a credible size nor a credible
+# resolution and latitude is held at the default size, as every directory
+# was before. NOT CHANGED: every tool's input and output schema and
+# description, which tiles staging fetches, every staged raster and every
+# number computed from one, eviction's ranking and ceiling, the
+# vegetation, road and basemap tiles and the elevation mosaics
+# (`dem_*.tif`) still not held, and the errors tiles_in_use raises on a
+# malformed bbox_3857 (B25). One side effect, not a fix of B25: a
+# bbox_3857 of fewer than four entries in a manifest that records its
+# raster size, as every manifest from 0.31.9 does, is now skipped instead
+# of raising.
+# 0.31.10: point_in_geometry's distance_to_boundary_m is ground metres in
+# every direction, to the nearest edge. WHAT WAS WRONG: the distance was
+# planar degrees times 111,320 m x cos(latitude), right east-west only, so
+# north-south it read short by cos(latitude): 222 m inside a north edge at
+# 37.4 N read 177 m, the test square's "outside" case 3,330 m read 2,651 m,
+# and at 60 N 223 m read 111 m. It measured a Polygon to its outer ring
+# alone, so a point in a 200 m hole read 884 m from the boundary when the
+# hole's edge was 88 m away, and any other geometry to the shape itself,
+# so a point deep inside a MultiPolygon read 0.0 m - on the line. Latitude
+# 95 read -558,651 m, and a NaN latitude from a direct call read NaN,
+# which is not JSON (PR #4 review B4; the code predates the PR, moved from
+# server.py).
+# WHAT CALLERS SEE NOW: the distance is measured in an azimuthal
+# equidistant projection centred on the point, to every ring of a polygon
+# - a hole's and every part's - cut into pieces of 0.001 degrees, so it is
+# true WGS84 ground metres whichever way the edge lies, a point inside a
+# MultiPolygon reads how far inside it is, and a point in an inholding
+# reads its distance to the inholding's edge. A latitude outside -90..90
+# or a longitude outside -180..180, or one that is not a number, is
+# refused naming the coordinate in the words the scenarios use ("latitude
+# must be a number within -90..90; got 95.0"), asking whether the
+# longitude was passed as the latitude only when the pair swapped would
+# be on the globe. Refused too, each in its own words, where a wrong
+# figure was answered before: a geometry with no coordinates
+# ("coordinates": []), one with a coordinate that is not a number, and
+# one with a latitude past a pole, which names that latitude. The
+# measurement lives in the new `geo.distance_to_boundary_m`; nothing else
+# in the server measured the old way, so no other tool's answer moves.
+# NOT CHANGED: every tool's input and output schema and description, the
+# `inside` answer (holes and parts were already respected), a line or
+# point geometry measured to itself, and a line whose positions are all
+# one place to that place (in ground metres now too),
+# boundary_clearance and its own distance_to_boundary_m, and the error a
+# geometry that will not parse raises, `{}` among them (B47).
+# 0.31.11: a candidate set made under one norms file is never read back
+# under another, and a corrected `public` reaches every later map read.
+# WHAT WAS WRONG: a set id hashed the call's parameters and, of the norms,
+# only hasty's corridor widths, so a server restarted with another
+# agency's --norms over the same cache read back the old corpus's sets as
+# current (`reused` true): hasty lines carried flags read against the old
+# length, width and area bands, and urban assignments whose `target_ha`
+# was left to the norms stayed grouped toward the old median, their
+# `target_source` still calling it "corpus median for GROUND" while
+# assignment_norms on the same server gave the agency's (PR #4 review
+# B23; the ids predate the PR, whose plan_initial_response and
+# plan_urban_search read the sets back). And the area key hashes the map
+# id but not `public`, so a call on a private map corrected from
+# public=True to public=False was answered "already staged" while every
+# later read of the map, each scenario section's among them, still went
+# through the public endpoint and failed: the hasty overlap was lost,
+# with a warning, beside a staging record whose own read had worked. The
+# scenarios take no `force`, so only a direct prepare_area(force=True)
+# got out of it (B49; inherited from prepare_area). prepare_terrain,
+# answering "already current", kept the old path the same way.
+# WHAT CALLERS SEE NOW: hasty_candidates' set parameters carry
+# `norms_digest`, a hash of the server's norms, and urban_assignments'
+# do when `target_ha` is left to them, so under another norms file the
+# set is made afresh under a new id, `reused` false - in
+# plan_initial_response and plan_urban_search too - flagged against the
+# new bands and grouped toward the new median. Every such id changed once
+# with this release: a set saved before is measured again on its first
+# call, and an id already held still names the set it named, as it was
+# measured then under the norms of that time (the README says so).
+# Populated blocks, which no norm decides, are still read back.
+# prepare_area and prepare_terrain answering from ground already staged
+# record the path the call has just read the map by, in `access.json`
+# beside the manifest, and every later read of the map goes that way: the
+# corrected call's sections read the private map, and nothing is staged
+# again. Only a path that worked is recorded: a later call leaving
+# `public` at its default true on a private map says in its warnings that
+# its own read failed, as before, and the handle keeps reading the map by
+# the path recorded before it. A re-stage writes a manifest holding its
+# call's path and removes the file. hasty_candidates' description now says
+# the same parameters give the same set id under the same assignment norms.
+# NOT CHANGED: every tool's input and output schema, every other
+# description, the manifest (rewriting it would have reported every set
+# on the handle as made before a re-stage), the ids of urban sets given a
+# `target_ha` and of every set no norm decides, the map-version check on
+# hasty sets, and the path a first stage records.
+# 0.31.12: parse_coordinate reads a hemisphere letter before the number.
+# WHAT WAS WRONG: a letter was read only after the number, so the form
+# many GPS units display - "N37°56.324' W122°00.092'", "N 37° 56.324'
+# W 122° 00.092'", "N37.93873 W122.00153" - came back parsed false, "not a
+# recognisable coordinate", in every format, near point or not. Found
+# writing the HTML guide's examples. A person reading the screen aloud
+# had to be asked to say it another way.
+# WHAT CALLERS SEE NOW: `coords.parse_angle` takes the letter before the
+# number as it takes it after, and `parse_pair` splits a letters-first
+# pair with no comma before its second letter, so these forms parse to the
+# same point, longitude first as well ("W122.3151 N37.4244"). A letter on
+# both sides of one value ("N37.4244N") is refused, not one of them
+# believed, as is a letters-first pair whose second value has no letter
+# and no comma ("N37.4244 122.3151"), where the split cannot be told.
+# parse_coordinate's description says the letter may come before or after.
+# NOT CHANGED: every form that parsed before, the grid formats, every
+# tool's schema, and a sign the letter contradicts ("E-122", like
+# "-122 E"), where the letter wins as it always has.
+# 0.32.0: egress stays on the trails once on one, and a litter that
+# cannot leave a steep spot is carried from the nearest ground it can.
+# WHAT WAS WRONG: a medevac from a point 112 m above the Pacific Crest
+# Trail at a test point beside a backcountry lake drew two walk-outs that left
+# the PCT for ~200 m across the slope - one to a 4x4 road track,
+# one to a campsite track stub - to save 1.2 and 0.6 minutes over trails
+# that reached the same roads. Egress was least time alone, and off a way
+# was only Tobler's 0.6 times vegetation, so any shortcut a little over
+# half the trail's way round won. The litter's carry-out drew nothing:
+# the point itself reads 66 degrees on both elevation models, so it was
+# "rope or helicopter" and no more, and the hiker's lines were the only
+# ones on the map. Neither the lines nor the scenario said a metre was off
+# trail: the warning needed over half, and the scenario dropped
+# off_trail_m.
+# WHAT CALLERS SEE NOW: `egress_routes` solves in two stages
+# (`egress_graph.solve_staying_on_ways`): free to the first mapped way,
+# then a step off every way counts 1 / `leave_way_factor` times over in
+# choosing the route (new, default 0.1, in (0, 1], 1 turns it off; an
+# exit's own cells never count over). `minutes` stay walking minutes.
+# A carry-out stuck on its location now starts each exit's carry from the
+# nearest cell, by the elevation model without the grade limit, from
+# which a litter reaches that exit; the exit gains `litter_start` {point,
+# distance_m, bearing_deg, drop_m, direction} (null otherwise) and a
+# warning that a rope evacuation gets the patient there. Only when no
+# such cell exists is the reason still a rope evacuation or a landing
+# zone. The scenarios' compact exits gain `off_trail_m`, `on_trail_share`
+# and `litter_start`; a summary's quickest exit gains `off_trail_m` (and
+# `litter_start` when set); every route line with any ground off a way
+# says how many metres. At that point the walk-outs are now 55.5 and 39.2
+# min with only the 239 m down to the PCT off trail, and the carry-outs
+# start 125 m SE, 11 m lower, 64 m off trail.
+# NOT CHANGED: the movement model, travel rings, a route that never
+# touches a way, the exit masks, and every other tool.
+# 0.33.0: a medevac follows its trail off the edge of the ground, belays a
+# litter down a steep pitch of trail, walks a patient the maps put in a lake
+# ashore, and grades landing zones out to the edge of the staged buffer.
+# WHAT WAS WRONG: a test medevac at a backcountry lake drew a
+# walk-out and carry-out that cut 3.6 and 9.2 km cross-country to a 4x4
+# track: the lake's trail ran off the east edge of the 3,000 m exit ground
+# before its trailhead, and nothing said so. The walk-out alone said the
+# ground was cut off: the patient, 5 m from the shore, stood in cells the
+# 30 m land cover and the shoreline read as lake, and so did every
+# neighbour. With the ground widened by hand, the carry still left the
+# trail for 150 m round a pitch steeper than its 40 % step limit, which
+# applied on the trail too. And a marginal landing zone on that trail,
+# 1,290 m out, was staged (the buffer reached 2,000 m) but never graded:
+# only the 1,000 m circle was.
+# WHAT CALLERS SEE NOW: `egress_routes` - a step along a mapped way (both
+# ends on it) is exempt from the litter's per-step limit; each exit gains
+# `steep_pitch_m` (metres of such pitch, null with no grade limit, and a
+# belay warning) and `off_trail_after_joining_m`. When no exit is reached
+# without leaving a trail for over 100 m after joining one and a trail runs
+# off the edge, the answer gains `trail_beyond` {point, way_name, minutes,
+# distance_m, bearing_deg, problems, recentre} and a warning; null
+# otherwise. A walk-out whose own cell is closed opens the straight line to
+# the nearest open ground and says so in `closed_start` and a warning.
+# `lz_candidates` takes `whole_ground` (default false): every staged cell
+# is graded, the tree check fetched over the whole raster, and
+# `assumptions.searched` says which. `plan_medevac` grades its landing
+# zones over the whole ground, and when a mode's `trail_beyond` is set it
+# stages the exit ground once more, re-centred along the trail
+# (`staging.egress_recentred`), asks again and keeps the answer more on
+# the trails; the mode gains `trail_beyond` and `recentred`. At that lake
+# the plan now finds the marginal zone 1,290 m east beside the trail, and
+# both exits end at the trailhead lot: the walk-out 144.6 min,
+# 9.1 km, 99.4 % on trail; the carry-out 575.7 min with no metre off trail
+# after joining it and 28 m of pitch to belay.
+# NOT CHANGED: a walk-out on open ground, a route that reaches a road on
+# its trail, landing zones from `lz_candidates` called without
+# `whole_ground`, and every other scenario.
+# 0.34.0: plan_initial_response lists trails and roads alone as hasty
+# candidates by default.
+# WHAT WAS WRONG: at a test place last seen on a trail in a wooded
+# open-space preserve the hasty section found 358 candidates, 323 of
+# them ridge, drainage and waterway corridors, mostly 100-300 m pieces of
+# wooded ground; the nearest 20 held one trail and two roads, and the
+# export drew all of them as drafts. The ground's "a drainage / a
+# ridgeline reaches the raster edge" warnings also came back on a set that
+# held neither.
+# WHAT CHANGED: the hasty section calls hasty_candidates with include
+# ["trail", "road"] unless `overrides['hasty']['include']` is given; null
+# there lists every axis as before, a list names the axes. The default is
+# in the section's detail_call and is never reported as an unused
+# override. A hasty `corridor_widths_m` with no corridor axis in the list
+# gains a top-level warning. hasty_candidates drops a raster-edge warning
+# whose axis is not in its include (boundary.EDGE_WARNINGS). On that ground
+# the list is 35 lines: 7 trails, 28 roads.
+# NOT CHANGED: hasty_candidates' own default (every axis), the other
+# scenarios, and a set saved before this release, which is read back with
+# the warnings it was saved with.
+# 0.35.0: urban assignments keep each street whole, both sides, and miss
+# no house.
+# WHAT WAS WRONG: against a hand-drawn reference map of a small town the
+# grouping merged any blocks that touched, toward 10 ha, so rows backing
+# onto each other went to one team and a street's two sides to two (AS);
+# lots chose their street from OpenStreetMap lines drawn 10-15 m off the
+# parcels; a block the ring crossed was cut at the panel edge; runs under
+# min_parcels (51 built lots there) and vacant lots were left out; the
+# water pass paired touching groups and drew strips over houses.
+# WHAT CHANGED: blocks merge along streets that join (street_links), into
+# one piece; back-to-back only under 30 % of the target; lots vote from the
+# right-of-way they touch; every block the ring reaches is kept whole (200 m
+# panel margin, so the widest urban radius is about 3.9 km); short runs and
+# small cut pieces join the block whose lots they touch; vacant lots
+# touching their street's houses join it (`vacant_lots`); water pairs are
+# more than a street apart and cross no block. Set ids carry `method`, so
+# older sets are drawn again. At 2.5 ha the reference town gives 17 one-piece
+# assignments, 4 built lots left out.
+# NOT CHANGED: the default target (corpus median; `target_ha` sets it),
+# arterials, and the hasty and other scenarios.
+# 0.36.0: hasty_candidates lists trails and roads alone by default.
+# WHAT WAS WRONG: 0.34.0 narrowed plan_initial_response's hasty list to
+# trails and roads, but hasty_candidates called on its own still listed
+# every drainage, ridge and waterway, hundreds of 100-300 m pieces on
+# wooded ground that bury the walkable lines.
+# WHAT CHANGED: `include` null now means ["trail", "road"]
+# (corridors.DEFAULT_INCLUDE); name drainage, ridge or waterway to list
+# them, all five for every kind (corridors.ALL_INCLUDE). The raster-edge
+# warnings follow, so a default set carries neither. plan_initial_response's
+# `overrides['hasty']['include']` null still means every axis, now passed
+# as the five names, which is what its detail_call shows.
+# NOT CHANGED: a set named with all five keeps its id (null then hashed to
+# the same list); a set saved under the old default is not read back for a
+# null call, which now hashes to trails and roads.
+# 0.37.0: hasty_candidates no longer offers drainages or ridges.
+# WHAT WAS WRONG: the drainage and ridge corridors traced off the elevation
+# model were not stable or useful as hasty candidates: on wooded ground
+# hundreds of 100-300 m pieces (on the preserve 323 of 358 candidates were
+# corridors), and in developed ground they followed the street grid.
+# WHAT CHANGED: `include` takes trail, road and waterway only (default
+# trail and road); drainage or ridge is refused by the schema, and
+# `corridor_widths_m` takes waterway alone. A waterway corridor is the
+# mapped creek, clipped to the area, no longer matched against the DEM
+# drainage network (`sources` is ["waterway"]). The ground's drainage and
+# ridgeline raster-edge warnings are always dropped from a hasty set.
+# plan_initial_response's `include: null` is now the three names. Set ids
+# change, since the hashed widths cover waterway alone.
+# NOT CHANGED: the ground still traces drainages and ridges, and
+# describe_boundary, terrain_metrics, identify_features, debrief and the
+# other tools read them as before. A set saved before this release is read
+# back as it was saved.
+# 0.37.1: urban search no longer drops houses folded into the street.
+# WHAT WAS WRONG: in a downtown test area a row of small, fully roofed lots
+# beside the place last seen was in no assignment. Read as condo-unit
+# parcels, they were folded into the neighbour they share most edge with:
+# the street right-of-way. Their roofs then kept the street from reading
+# as street. A short run whose only neighbour was another short run was
+# left out when that run joined a block after it.
+# WHAT CHANGED: a unit parcel is never folded into right-of-way or ground
+# over 10 ha (FOLD_PARENT_MAX_M2); with no other neighbour it stays a lot.
+# Short runs join blocks in passes until none moves. The block method is 3,
+# so saved sets are drawn again. The test area leaves no built lot out (was 3).
+# Docs: the urban and plan_urban_search pages re-run on this release.
+# 0.38.0: a Claude Desktop extension (extension/, dist/sar-geo.mcpb) for
+# people who don't code. Its launcher runs the newest release from PyPI on
+# every start, so a tag pushed here reaches every install on its next
+# restart (.github/workflows/release.yml publishes it). NEW: the CalTopo
+# credential can be given directly as ZA_CALTOPO_ID / ZA_CALTOPO_KEY /
+# ZA_CALTOPO_ACCOUNT_ID instead of a cts.ini, and is then used in place of
+# the file; `key_status` says which optional keys are set (never their
+# values) and where to get each; `check_for_update` compares the running
+# version with PyPI's newest. serverInfo now carries this package's
+# version, not fastmcp's. Nothing existing changes.
+# 0.39.0: files reach the person who asked for them.
+# WHAT WAS WRONG: under the Claude Desktop extension a medevac export was
+# reported as cache/staged/aoi-.../exports/medevac.geojson - relative to a
+# folder inside Claude's own app data - and Claude could only tell the
+# user to search their disk for it. The extension's Data folder setting was
+# also ignored: Claude Desktop passed its default ${HOME}/SAR Geo through
+# unexpanded, so everything was cached inside the extension's install
+# folder, where a reinstall can delete it.
+# WHAT CHANGED: the cache directory is always absolute (review B22, which
+# its test now holds), with ~, ${HOME} and Claude Desktop's ${DOCUMENTS}
+# placeholders filled. Under the extension, terrain is cached in the system
+# cache folder (~/Library/Caches/sar_geo, %LOCALAPPDATA%\sar_geo\cache),
+# not in Documents, which many people sync. NEW: `save_export` copies a
+# file a tool wrote (an export GeoJSON, a chip) to ~/Documents/sar_geo/
+# <chat folder> - the caller names the chat's folder, since the server
+# cannot see which chat it serves; today's date otherwise - and shows it in
+# Finder or Explorer. Only files under the cache can be copied. The folder
+# is SAR_GEO_EXPORTS_DIR, the extension's "Exports folder" setting, and
+# key_status reports it. Files already cached in the old place stay there.
+# Docs: README.md is now for people using SAR Geo; AGENTS.md holds the
+# developer guide and the architecture rules; docs/ keeps only the HTML.
+# 0.39.1: the first public release, under the MIT license.
+# WHAT CHANGED: LICENSE (MIT) added and declared. Comments, examples, test
+# fixtures and messages no longer name real operations, people, teams,
+# maps or places tied to a search: map IDs, track and assignment labels,
+# dates and coordinates are made up, and the assignment norms keep their
+# statistics without naming their source. Overpass requests now identify
+# as sar-geo-mcp. The HTML guide is withdrawn until it is regenerated on a
+# public demo map. Review B36 is fixed: a debrief answer no longer names a
+# command-line tool or the server's cache path, and tracks that miss the
+# assignment are refused with "check the team number, and that the track is
+# from this assignment and on this map" instead of asking about a data
+# directory the caller never chose. NEW: every GeoJSON file written for
+# CalTopo (caltopo_export, the scenarios' files, unmarked_paths) puts all
+# its features in one CalTopo Folder, "SAR Geo <what> <date time>", so an
+# import lands as one group to move or delete; caltopo_export reports it as
+# `folder`. CalTopo has no folder inside a folder, so a feature that already
+# carries one is refused rather than nested. 0.38.0 and 0.39.0 were
+# withdrawn from PyPI; this release replaces them.
+version = "0.39.1"
+description = "CalTopo interaction hub and geo-computing accessories for SAR"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = [
+    # Caps are deliberate, carried over from the original project
+    # from: this is infrastructure for field laptops, not a library chasing
+    # the latest of everything.
+    "caltopo-python>=2.0.0,<3",
+    "pydantic>=2.7,<3",
+    "pyproj>=3.6,<4",
+    "shapely>=2.0.2,<3",
+    "httpx>=0.27",
+    "numpy>=1.26",
+    # Imported by caltopo/wms.py since 0.5.3 and by planning/rasters.py, and
+    # arriving transitively until now. Both raster tools decode and draw with
+    # it, so it is declared rather than borrowed.
+    "pillow>=10.0",
+    # 1.4 is the first release built against numpy 2; rasterio 1.3.x imports
+    # fail with "numpy.core.multiarray failed to import" under numpy>=2.
+    "rasterio>=1.4",
+    "pysheds>=0.5,<1",
+    "scipy>=1.11,<2",
+    # The centreline skeleton in terrain/lineaments.py. Already arriving
+    # with pysheds, which requires it; declared because this package now
+    # imports it directly, the same reasoning as pillow above.
+    "scikit-image>=0.20,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2"]
+# The MCP server itself (Phase B3). Kept optional so a consumer that only
+# wants the library - which is every consumer today - does not pull a
+# server framework it never starts.
+mcp = ["fastmcp>=3,<4"]
+
+[project.scripts]
+# The stdio entry point an MCP client launches. Only useful with the [mcp]
+# extra installed; without it the import fails with fastmcp's own message,
+# which names the missing package.
+sar-geo-mcp = "sar_geo_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# The LANDFIRE vegetation lookup ships with the code. Learned the hard way
+# in an earlier project: an editable install reads straight from src/, so a
+# missing package-data entry stays invisible until a real wheel is built
+# and something fails at runtime.
+# The assignment-anatomy norms (planning/norms.py) ship the same way, for
+# the same reason.
+sar_geo_mcp = ["terrain/data/*.csv", "planning/data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "live: hits real network services; requires credentials",
+]
+# --strict-markers turns a misspelled marker into a collection error.
+# Without it, `@pytest.mark.livee` silently runs in the default suite,
+# defeating the whole point of keeping credentialed network calls out of it.
+addopts = "-m 'not live' --strict-markers -ra"

@@ -1,0 +1,303 @@
+{
+  "manifest_version": "0.4",
+  "name": "sar-geo",
+  "display_name": "SAR Geo",
+  "version": "1.0.1",
+  "description": "Search and rescue planning on CalTopo maps: terrain, hasty lines, landing zones, the way out, hospitals and urban assignments.",
+  "long_description": "SAR Geo gives Claude the sar-geo-mcp tools: read CalTopo maps, stage terrain around a place last seen, list hasty search candidates, parking, helicopter landing zones, exits and the nearest hospitals, plan urban assignments, and export GeoJSON files CalTopo imports as draft assignments. It never writes to CalTopo.\n\nThe extension updates itself: each time Claude Desktop starts it, it runs the newest release from PyPI. Ask Claude \"check for a sar-geo update\" to see which version you have. Every key in the settings is optional; ask Claude \"what's my sar-geo key status?\" to see what each one unlocks.\n\nAsk Claude to save a file and it goes in Documents/sar_geo, one folder per chat, and opens in Finder or Explorer. Downloaded terrain is cached out of the way in your system's cache folder.",
+  "author": {
+    "name": "Paul Gu"
+  },
+  "homepage": "https://pypi.org/project/sar-geo-mcp/",
+  "icon": "icon.png",
+  "server": {
+    "type": "uv",
+    "entry_point": "src/launcher.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${__dirname}",
+        "src/launcher.py"
+      ],
+      "env": {
+        "ZA_CALTOPO_ID": "${user_config.caltopo_id}",
+        "ZA_CALTOPO_KEY": "${user_config.caltopo_key}",
+        "ZA_CALTOPO_ACCOUNT_ID": "${user_config.caltopo_account_id}",
+        "ZA_WMS_TOKEN": "${user_config.wms_token}",
+        "ZA_MAPBOX_TOKEN": "${user_config.mapbox_token}",
+        "ZA_GOOGLE_MAPS_KEY": "${user_config.google_maps_key}",
+        "SAR_GEO_EXPORTS_DIR": "${user_config.exports_folder}",
+        "ZA_CACHE_DIR": "${user_config.cache_folder}",
+        "SAR_GEO_PIN_VERSION": "${user_config.pin_version}"
+      }
+    }
+  },
+  "user_config": {
+    "wms_token": {
+      "type": "string",
+      "title": "CalTopo WMS token",
+      "description": "Optional. Six characters from CalTopo: click your name, then Your Account, API Access, and copy the part between /api/ and /wms in the WMS link. Turns on terrain pictures, the canopy panel and landing-zone imagery.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "caltopo_id": {
+      "type": "string",
+      "title": "CalTopo credential ID",
+      "description": "Optional. Only needed for private or team maps. From CalTopo: Your Account, Credentials (12 characters). A read-only team credential is enough.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "caltopo_key": {
+      "type": "string",
+      "title": "CalTopo credential key",
+      "description": "Optional. The key that goes with the credential ID above.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "caltopo_account_id": {
+      "type": "string",
+      "title": "CalTopo account ID",
+      "description": "Optional. Six characters, from Your Account. Only needed for printing PDFs through CalTopo.",
+      "required": false,
+      "default": ""
+    },
+    "mapbox_token": {
+      "type": "string",
+      "title": "Mapbox token",
+      "description": "Optional. Adds Mapbox satellite pictures to landing zones. Free from account.mapbox.com.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "google_maps_key": {
+      "type": "string",
+      "title": "Google Maps key (advanced)",
+      "description": "Optional. Adds Google satellite pictures to landing zones. Needs the Maps Static API; Google's terms limit how these images may be used.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "exports_folder": {
+      "type": "directory",
+      "title": "Exports folder",
+      "description": "Where files you ask to save go, one subfolder per chat (for example Documents/sar_geo/2026-01-01 example medevac).",
+      "required": false,
+      "default": "${DOCUMENTS}/sar_geo"
+    },
+    "cache_folder": {
+      "type": "directory",
+      "title": "Cache folder (advanced)",
+      "description": "Leave blank. Downloaded terrain, which can grow to a few GB, is kept in your system's cache folder (Library/Caches/sar_geo on a Mac) and downloaded again if deleted.",
+      "required": false
+    },
+    "pin_version": {
+      "type": "string",
+      "title": "Pin version",
+      "description": "Leave blank to always run the newest release. Type a version (for example 0.38.0) to stay on it, such as during an operation.",
+      "required": false,
+      "default": ""
+    }
+  },
+  "tools": [
+    {
+      "name": "list_assignments",
+      "description": "List the search assignments on a CalTopo map."
+    },
+    {
+      "name": "get_assignment",
+      "description": "One assignment in full: its geometry, description, and centre."
+    },
+    {
+      "name": "list_map_features",
+      "description": "Every feature on a map - markers, lines, polygons, tracks."
+    },
+    {
+      "name": "parse_coordinate",
+      "description": "Read a coordinate a person wrote or said, in any common format."
+    },
+    {
+      "name": "convert_coordinate",
+      "description": "One point in every format a team might need it in."
+    },
+    {
+      "name": "distance_bearing",
+      "description": "Ground distance and initial bearing between two points."
+    },
+    {
+      "name": "point_in_geometry",
+      "description": "Whether a point falls inside a GeoJSON geometry."
+    },
+    {
+      "name": "geometry_bounds",
+      "description": "The WGS84 bounding box and centre of a GeoJSON geometry."
+    },
+    {
+      "name": "boundary_clearance",
+      "description": "How much of a boundary's inside surrounds this, and does the way in"
+    },
+    {
+      "name": "buffer_geometry",
+      "description": "Widen a line into the polygon CalTopo's Buffer tool would draw:"
+    },
+    {
+      "name": "prepare_terrain",
+      "description": "Stage the ground for one assignment and return a handle for it."
+    },
+    {
+      "name": "prepare_area",
+      "description": "Stage the ground around a planner-chosen area and return its handle."
+    },
+    {
+      "name": "terrain_metrics",
+      "description": "Everything measured for a staged assignment: slope, landform,"
+    },
+    {
+      "name": "site_facts",
+      "description": "Is this a place a team can occupy and work? Measurements, not a verdict."
+    },
+    {
+      "name": "list_feature_kinds",
+      "description": "The terrain feature kinds this server can identify."
+    },
+    {
+      "name": "identify_features",
+      "description": "Identify selected terrain features on a staged assignment."
+    },
+    {
+      "name": "slope_stats",
+      "description": "Slope statistics inside one named shape of a staged assignment."
+    },
+    {
+      "name": "elevation_profile",
+      "description": "Elevation along a drainage centreline - how steep is the channel."
+    },
+    {
+      "name": "assignment_norms",
+      "description": "What real assignments look like: sizes, corridor widths, how much"
+    },
+    {
+      "name": "caltopo_export",
+      "description": "Write a candidate set as a GeoJSON file CalTopo imports as DRAFT"
+    },
+    {
+      "name": "get_candidate",
+      "description": "One candidate in full, geometry included, by the id a generating"
+    },
+    {
+      "name": "prefetch_map",
+      "description": "Cache a map's terrain ahead of losing connectivity."
+    },
+    {
+      "name": "cache_status",
+      "description": "What this machine has cached: size, age, and split by layer."
+    },
+    {
+      "name": "evict_cache",
+      "description": "Bring the cache back under a size ceiling, oldest use first."
+    },
+    {
+      "name": "save_export",
+      "description": "Save a file a tool wrote (a GeoJSON export, an imagery chip) to the"
+    },
+    {
+      "name": "key_status",
+      "description": "Which optional keys are set, what each unlocks, and where to get it."
+    },
+    {
+      "name": "check_for_update",
+      "description": "Is this the newest version of sar-geo, and how to get it if not."
+    },
+    {
+      "name": "shaded_relief",
+      "description": "Terrain you can see, and linear features OpenStreetMap has not got."
+    },
+    {
+      "name": "slope_shading",
+      "description": "CalTopo's slope shading beside this package's own, and where they differ."
+    },
+    {
+      "name": "unmarked_paths",
+      "description": "Roads and trails on the ground that the map does not show, from"
+    },
+    {
+      "name": "describe_boundary",
+      "description": "The anatomy of one assignment or drawn shape on staged ground:"
+    },
+    {
+      "name": "hasty_candidates",
+      "description": "The lines a team can run on day one around a staged area: every"
+    },
+    {
+      "name": "parking_candidates",
+      "description": "Where a search can park near a staged area: public parking lots and"
+    },
+    {
+      "name": "lz_candidates",
+      "description": "Where a helicopter can put down near a staged area: open, flat"
+    },
+    {
+      "name": "egress_routes",
+      "description": "The way out on the ground: the quickest exit a 2WD vehicle can"
+    },
+    {
+      "name": "travel_time_rings",
+      "description": "Rings of equal walking time round a place last seen: the travel-time"
+    },
+    {
+      "name": "nearest_medical_facilities",
+      "description": "The closest MEDICAL CENTER (acute-care hospital), TRAUMA CENTER and"
+    },
+    {
+      "name": "populated_areas",
+      "description": "Populated blocks in town (urban and suburban ground only): the"
+    },
+    {
+      "name": "urban_assignments",
+      "description": "Urban search assignments: the populated blocks of a staged town"
+    },
+    {
+      "name": "coverage_for",
+      "description": "Coverage and gaps for a staged assignment, from named GPS tracks."
+    },
+    {
+      "name": "plan_medevac",
+      "description": "A patient at a point - a subject found, or a searcher hurt - and the"
+    },
+    {
+      "name": "plan_initial_response",
+      "description": "The first operational period of a wilderness search, from a place"
+    },
+    {
+      "name": "plan_urban_search",
+      "description": "An urban or suburban search round a place last seen, in one call:"
+    },
+    {
+      "name": "debrief_assignment",
+      "description": "A team back from an assignment, in one call: what the ground was, how"
+    }
+  ],
+  "tools_generated": true,
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  },
+  "keywords": [
+    "search and rescue",
+    "SAR",
+    "CalTopo",
+    "maps",
+    "terrain",
+    "GIS"
+  ],
+  "license": "MIT"
+}

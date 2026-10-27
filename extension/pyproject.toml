@@ -1,0 +1,12 @@
+# The extension's own environment, which Claude Desktop builds with uv. It
+# holds only the launcher; the server itself comes from PyPI at each start
+# (src/launcher.py).
+[project]
+name = "sar-geo-extension"
+version = "1.0.1"
+description = "Claude Desktop launcher for sar-geo-mcp"
+requires-python = ">=3.10"
+dependencies = [
+    # The uv binary, in case the host's uv is not on PATH for the launcher.
+    "uv>=0.5",
+]

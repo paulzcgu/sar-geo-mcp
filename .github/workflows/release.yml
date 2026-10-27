@@ -1,0 +1,84 @@
+# Release a version: test, publish to PyPI, create the GitHub Release.
+#
+# Started by pushing a version tag (v0.38.0) - scripts/release.py does
+# that after its own checks. Everyone with the Claude Desktop extension
+# gets the PyPI release on their next Claude restart
+# (extension/src/launcher.py), so a tag here IS a release to the field.
+#
+# One-time setup on pypi.org, no token needed: Account -> Publishing ->
+# "Add a new pending publisher": project sar-geo-mcp, owner paulzcgu,
+# repository sar-geo-mcp, workflow release.yml, environment pypi.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Tag matches the package version
+        run: |
+          version=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME but pyproject says $version"; exit 1; }
+      - name: Release notes
+        run: python scripts/release_notes.py > release-notes.md
+      - name: Test
+        run: |
+          pip install -e ".[mcp,dev]"
+          pytest -q -m "not live" -p no:cacheprovider
+      - name: Build the package
+        run: |
+          pip install build
+          python -m build
+      - name: Build the Claude Desktop extension
+        run: python scripts/build_extension.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: |
+            dist/
+            release-notes.md
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+      - name: Keep only the package files
+        run: rm -f dist/*.mcpb
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    # After PyPI, so the Release never announces a version the extension
+    # cannot fetch yet.
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            --verify-tag

@@ -1,0 +1,7 @@
+; Copy to cts.ini and fill in from CalTopo. cts.ini is gitignored.
+; The section name must match ZA_CALTOPO_ACCOUNT (or be the only section).
+; A read-only team key is all this package needs.
+[you@example.com]
+id=
+key=
+accountId=

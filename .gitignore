@@ -1,0 +1,28 @@
+# Credentials - never commit
+.env
+.env.*
+!.env.example
+cts.ini
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Tile, map-state and staged-ground cache: ZA_CACHE_DIR defaults to
+# ./cache, which is inside the checkout. Machine-local data, never source.
+cache/
+
+# Build
+dist/
+build/
+
+# macOS Finder metadata
+.DS_Store
+
+# Working notes kept locally, not in the repo: plans and specs, and the
+# long-form design docs, and the HTML guide until it is regenerated on a
+# public demo map. The architecture rules live in AGENTS.md.
+docs/

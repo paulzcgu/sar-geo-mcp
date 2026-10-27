@@ -1,0 +1,112 @@
+{
+  "provenance": {
+    "analysed_on": "2026-09-04",
+    "maps": 65,
+    "assignments": 4673,
+    "polygons": 4528,
+    "lines": 145,
+    "tracks": 7400,
+    "dem": "USGS 3DEP resampled to 10 m",
+    "line_sources": "OpenStreetMap highway, waterway, natural, power, railway, barrier; drainages and ridges from D8 flow accumulation at 2 ha",
+    "limits": "OpenStreetMap lacks social trails, ranch roads and many fences; most 'no mapped feature' boundary length is that gap. Pooled figures read to about 5 percentage points.",
+    "crosswalk": {
+      "barrier": "the analysis's 'fence or power line' class, named for terrain/linear.py's BARRIER line class (power line, railway, fence, wall, pipeline)",
+      "corridor_width_m.by_axis.waterway": "not a separate aggregate; inferred from the analysis's worked stream corridors (30 m), the same as its drainage ribbons"
+    }
+  },
+  "tolerances_m": {
+    "road": 20,
+    "trail": 20,
+    "waterway": 25,
+    "drainage": 30,
+    "ridge": 30,
+    "barrier": 20,
+    "water_edge": 25,
+    "shared_edge": 15,
+    "straight_edge_min_m": 150,
+    "boundary_sample_m": 10
+  },
+  "polygon_area_ha": {
+    "p10": 2.0,
+    "p25": 3.8,
+    "p50": 9.1,
+    "p75": 19.6,
+    "p90": 31.0
+  },
+  "area_ha_by_resource": {
+    "note": "Only medians exist per resource. A resource's range is the overall quartile ratios applied to its median: p25 = 0.42 x median, p75 = 2.15 x median.",
+    "p25_ratio": 0.42,
+    "p75_ratio": 2.15,
+    "medians": {
+      "GROUND": 10.0,
+      "GROUND_1": 6.3,
+      "GROUND_2": 6.6,
+      "GROUND_3": 7.1,
+      "DOG": 5.4,
+      "DOG_HRD": 5.4,
+      "DOG_TRAIL": 0.7,
+      "DOG_AREA": 10.6,
+      "UAV": 23.7
+    }
+  },
+  "corridor_width_m": {
+    "p10": 20,
+    "p50": 44,
+    "p90": 118,
+    "by_axis": {
+      "drainage": 30,
+      "ridge": 44,
+      "trail": 12,
+      "road": 30,
+      "waterway": 30
+    },
+    "classifier": "aspect ratio at least 3 and mean width under 250 m; the axis is the interior feature running at least half the length"
+  },
+  "line_length_m": {
+    "p10": 593,
+    "p50": 4632,
+    "p90": 14254,
+    "on_trail_or_road_pct": 77
+  },
+  "boundary": {
+    "on_feature_pct": {
+      "p10": 50,
+      "p25": 64,
+      "p50": 78,
+      "p75": 93,
+      "pooled": 78
+    },
+    "composition_pct": {
+      "drainage": 31,
+      "trail": 22,
+      "ridge": 14,
+      "road": 10,
+      "barrier": 1,
+      "none": 22
+    },
+    "shared_pct_mean": 45,
+    "shared_and_on_feature_pct_mean": 35,
+    "straight_pct_mean": 24,
+    "straight_freehand_pct_mean": 8.5
+  },
+  "corridor_share_pct": {
+    "all": 32,
+    "drainage": 16,
+    "trail": 6,
+    "road": 2,
+    "ridge": 2,
+    "no_mapped_axis": 5
+  },
+  "grid_cell_m": {
+    "min": 100,
+    "default": 200,
+    "max": 250
+  },
+  "coverage_within_20m_pct": {
+    "p25": 40,
+    "p50": 76,
+    "p75": 96,
+    "corridors": 84,
+    "blocks": 70
+  }
+}
