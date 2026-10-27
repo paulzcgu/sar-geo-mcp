@@ -1218,7 +1218,33 @@ name = "sar-geo-mcp"
 # corpus file keeps its hectares, so another agency's file is written as
 # before, and is converted where an answer is written. Urban sets are named
 # by `target_acres` now, so each is made once afresh.
-version = "0.41.0"
+# 0.42.0: unmarked_paths reports what the agencies have on record; DEM
+# benches are experimental and off by default; BLM routes are read again.
+# WHAT WAS WRONG: run on four public-land areas, the terrain source's
+# "benches" were mostly not roads: 82-99% of them sat on a ridge crest or
+# in a channel, because the bench test - ground flatter than the slope
+# around it - fires there as readily as on a cut road, and on 6.3 m ground
+# a 4 m road tread is under one pixel. The imagery check made it worse: a
+# bare strip counted as a second, independent sighting, so a dry creek bed
+# under a channel "bench" came back `corroborated` and ranked first. And
+# BLM had retired the `BLM_Natl_GTLF` service the `blm` source read, so it
+# failed with a 404 everywhere and BLM land had no agency record at all.
+# WHAT CHANGED: with no `sources` named, unmarked_paths reads the Forest
+# Service, BLM and USGS inventories and checks each line against NAIP
+# imagery; `terrain` is read only when named, and every call that reads it
+# carries a warning that it is experimental. `imagery.bare` is now a check
+# reported on each line and never a sighting: it changes no tier and no
+# order. A caller who wants the benches back passes `terrain` in
+# `sources`; a bench on bare ground now stays `terrain_only`. The `blm`
+# source reads `BLM_Natl_GTLF_Public_Display`, all eight layers: a route's
+# kind (road or trail) and what it is managed for come from its layer
+# (`detail.managed_for`), and a route managed for limited public motorized
+# use, or not assessed for public use, says so in `status` beside any
+# access restriction BLM records ("Unknown" and "All" are no restriction).
+# The agency cache's query version is now 2, so ground staged before
+# fetches its agency records once more. The public display is not known to
+# carry routes BLM has designated closed.
+version = "0.42.0"
 description = "CalTopo interaction hub and geo-computing accessories for SAR"
 license = "MIT"
 license-files = ["LICENSE"]

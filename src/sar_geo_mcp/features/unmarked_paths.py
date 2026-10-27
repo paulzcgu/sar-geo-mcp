@@ -44,12 +44,13 @@ def register(mcp, ctx) -> None:
                              limit: int | None = None, refresh: bool = False,
                              write_geojson: bool = True,
                              geojson_limit: int = 0, bridges: bool = True) -> dict[str, Any]:
-        """Roads and trails on the ground that the map does not show, from
-        several sources at once, ranked by how many independent ones saw each.
+        """Roads and trails the land agencies have on record that the map
+        does not show, ranked by how many independent sources saw each.
 
         "Unmarked" means not in the staged OpenStreetMap ways - what nearly
         every map app, CalTopo's base layers included, draws. The sources
-        (`sources`, default all):
+        (`sources`; by default every agency source plus `imagery`, and NOT
+        `terrain`):
 
         - `usfs_roads` - the Forest Service road inventory, open AND closed.
           A closed road (maintenance level 1) is often still a walkable bench
@@ -59,27 +60,33 @@ def register(mcp, ctx) -> None:
         - `usgs_trails`, `usgs_roads` - the National Map's trails, 4WD and
           closed roads. Much of this is other agencies' data republished, so
           it is counted under its originator, never as a second sighting.
-        - `terrain` - benches cut into the hillside, from the DEM (the same
-          measurement as `shaded_relief`'s lineaments). Noisy: undisturbed
-          rough ground reports about 60 per km2.
         - `imagery` - not a line source but a check on every line the others
           found: USGS NAIP aerial imagery, read for a corridor barer (lower
-          NDVI) than the ground 8 m either side, the way a dirt road or
-          landing reads. Where it finds one it counts as an independent
-          sighting, so a terrain bench on a bare corridor is `corroborated`.
-          Measured: 8 of 10 real benches passed, 10% of random lines did.
-          Its tiles are cached with the staged ground; the first call fetches
-          them (about 15-60 s). `imagery.bare` null means NOT LOOKED AT.
+          NDVI) than the ground 8 m either side, the way a dirt road reads -
+          does an old road still show on the ground? Reported as
+          `imagery.bare` on each line and NEVER counted as a sighting: a dry
+          creek bed or a bare ridge passes it as readily as a road, so it
+          changes no tier and no order. Its tiles are cached with the staged
+          ground; the first call fetches them (about 15-60 s). `imagery.bare`
+          null means NOT LOOKED AT.
+        - `terrain` - EXPERIMENTAL, read only when named. Benches in the DEM
+          (the same measurement as `shaded_relief`'s lineaments): ground
+          flatter than the slope around it, which a ridge crest or a channel
+          bottom is as much as a cut road. On four public-land areas 82-99%
+          of its lines sat on a crest or in a channel. Every call that reads
+          it carries a warning saying so; treat a `terrain_only` line as a
+          place to look, never as a path.
 
         `bridges` (default on) joins a line's end to the nearest other line
-        or mapped way within 40 m along FLAT ground, where the bench signal
-        fades at a junction or landing. Bridges come back in their own
+        or mapped way within 40 m along FLAT ground, where a line fades out
+        at a junction or landing. Bridges come back in their own
         `bridges` list, and green in the CalTopo file - a bridge is a join,
         never a detection.
 
         Pieces from different sources along the same ground become one
         candidate. Each says `tier` - `corroborated` (two or more independent
-        sources), `agency_record` (one agency inventory) or `terrain_only` -
+        sources), `agency_record` (one agency inventory) or `terrain_only`
+        (only when `terrain` was named) -
         with `independent_sources`, every `sightings` entry and how much of
         the line it covers, `length_m`, `nearest_mapped`, and
         `close_to_mapped` when it may be a mapped way drawn elsewhere.
@@ -98,7 +105,8 @@ def register(mcp, ctx) -> None:
         a planner looking at the map should still see it.
 
         Nothing here is a verified route. An agency line is where a road was
-        surveyed, perhaps decades ago; a bench can be a fault scarp. Game
+        surveyed, perhaps decades ago; a bench can be a ridge, a channel or
+        a fault scarp. Game
         trails are not in any of these sources and are mostly too narrow for
         the DEM - see `assumptions.game_trails`. Look at `shaded_relief`'s
         images to judge a candidate by eye.

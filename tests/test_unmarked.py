@@ -96,6 +96,42 @@ def test_query_layer_follows_pagination_and_describes_each_record():
     assert records[0]["lineage"] == "usfs" and records[0]["kind"] == "road"
 
 
+def test_blm_reads_every_public_display_layer_and_takes_kind_from_the_layer():
+    layers = SOURCES["blm"]
+    assert len(layers) == 8
+    assert all("BLM_Natl_GTLF_Public_Display/MapServer/" in layer.url for layer in layers)
+    assert sorted(int(layer.url.rsplit("/", 1)[1]) for layer in layers) == list(range(8))
+    assert all("PLAN_MODE_TRNSPRT" in layer.out_fields
+               and "OBSRVE_MODE_TRNSPRT" not in layer.out_fields for layer in layers)
+
+    seen = []
+
+    def get(url, params):
+        seen.append(url)
+        layer = int(url.rsplit("/", 2)[1])
+        attributes = {"FAMS_ID": f"R{layer}", "ROUTE_PRMRY_NM": "None",
+                      "PLAN_MODE_TRNSPRT": "Motorized" if layer < 4 else "Non-Motorized",
+                      "PLAN_ACCESS_RSTRCT": {1: "Authorized/Permitted User Only",
+                                             0: "UNKNOWN", 7: "All"}.get(layer, "None"),
+                      "ACCURACY_FT": 0}
+        return FakeResponse({"features": [{"attributes": attributes, "geometry": {
+            "paths": [[[-120.7, 39.0], [-120.71, 39.01]]]}}]})
+
+    answer = fetch_source("blm", (-121, 38, -120, 40), get=get)
+    assert answer["status"] == "ok" and len(seen) == 8
+    by_ref = {record["ref"]: record for record in answer["features"]}
+    assert [by_ref[f"R{n}"]["kind"] for n in range(8)] == ["road"] * 2 + ["trail"] * 6
+    assert by_ref["R0"]["status"] is None, "UNKNOWN restricts nothing"
+    assert by_ref["R7"]["status"] is None, "All restricts nothing"
+    assert by_ref["R1"]["status"] == ("limited public motorized use; "
+                                      "authorized/permitted user only")
+    assert by_ref["R6"]["status"] == "not assessed for public use"
+    assert by_ref["R4"]["detail"]["managed_for"] == "public non-motorized use"
+    assert by_ref["R4"]["detail"]["mode"] == "Non-Motorized"
+    assert by_ref["R0"]["name"] is None and by_ref["R0"]["detail"]["accuracy_ft"] is None
+    assert all(record["lineage"] == "blm" for record in answer["features"])
+
+
 def test_a_refused_query_is_a_failure_never_an_empty_source():
     def refuse(url, params):
         return FakeResponse({"error": {"code": 400}})
@@ -291,13 +327,33 @@ def run(tmp_path, **kwargs):
     return unmarked_paths(staged_ground(tmp_path), get=fake_agencies, **kwargs)
 
 
-def test_the_closed_road_on_the_bench_is_corroborated_and_ranked_first(tmp_path):
+ALL_BUT_IMAGERY = ["usfs_roads", "usfs_trails", "blm", "usgs_trails", "usgs_roads"]
+
+
+def test_by_default_terrain_is_not_read_and_the_closed_road_is_an_agency_record(tmp_path):
+    from sar_geo_mcp.planning.unmarked_paths import DEFAULT_SOURCES, TERRAIN_EXPERIMENTAL
+
+    assert "terrain" not in DEFAULT_SOURCES and "imagery" in DEFAULT_SOURCES
     result = run(tmp_path)
+    assert "terrain" not in result["sources"]
+    assert result["summary"]["terrain"] is None
+    assert TERRAIN_EXPERIMENTAL not in result["warnings"]
+    assert all(c["tier"] != "terrain_only" for c in result["candidates"])
+    road = [c for c in result["candidates"] if c["ref"] == "14N25K"][0]
+    assert road["tier"] == "agency_record"
+    assert road["independent_sources"] == ["usfs"]
+    assert road["status"] == "closed (maintenance level 1)"
+
+
+def test_terrain_named_is_read_as_experimental_and_corroborates_the_closed_road(tmp_path):
+    from sar_geo_mcp.planning.unmarked_paths import TERRAIN_EXPERIMENTAL
+
+    result = run(tmp_path, sources=[*ALL_BUT_IMAGERY, "terrain", "imagery"])
+    assert TERRAIN_EXPERIMENTAL in result["warnings"]
     first = result["candidates"][0]
     assert first["tier"] == "corroborated"
     assert first["ref"] == "14N25K"
-    assert first["independent_sources"] == ["imagery", "terrain", "usfs"]
-    assert first["status"] == "closed (maintenance level 1)"
+    assert first["independent_sources"] == ["terrain", "usfs"]
 
 
 def test_a_road_osm_already_has_is_not_offered(tmp_path):
@@ -332,7 +388,7 @@ def test_geometry_and_points_are_wgs84(tmp_path):
 
 
 def test_the_caltopo_file_holds_one_line_shape_per_candidate(tmp_path):
-    result = run(tmp_path)
+    result = run(tmp_path, sources=[*ALL_BUT_IMAGERY, "terrain", "imagery"])
     collection = read_export(result["export"]["path"])
     assert len(collection["features"]) == len(result["candidates"])
     first = collection["features"][0]["properties"]
@@ -380,15 +436,20 @@ def test_the_caltopo_file_can_be_capped(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Imagery as a source.
+# Imagery as a check on the lines.
 # ---------------------------------------------------------------------------
 
-def test_a_line_on_a_bare_corridor_gains_an_imagery_sighting(tmp_path):
+def test_a_bare_corridor_is_reported_but_never_counts_as_a_sighting(tmp_path):
     result = run(tmp_path)
     road = [c for c in result["candidates"] if c["ref"] == "14N25K"][0]
     assert road["imagery"]["bare"] is True
     assert road["imagery"]["flank_ndvi"] - road["imagery"]["along_ndvi"] >= 0.10
-    assert "imagery" in road["independent_sources"]
+    assert "imagery" not in road["independent_sources"]
+    assert all(s["source"] != "imagery" for s in road["sightings"])
+    assert road["tier"] == "agency_record", "a bare corridor promotes nothing"
+    bench_run = run(tmp_path, sources=["terrain", "imagery"])
+    assert all(c["tier"] == "terrain_only" for c in bench_run["candidates"]), (
+        "a bench on a bare corridor stays terrain_only")
     trail = [c for c in result["candidates"] if c["ref"] == "11E31"][0]
     assert trail["imagery"]["bare"] is False, "vegetated either side and along"
     assert trail["tier"] == "agency_record"

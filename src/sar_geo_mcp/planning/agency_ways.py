@@ -25,7 +25,17 @@ THE LAYERS, VERIFIED LIVE 2026-10-21
   with `sourceoriginator` "U.S. Forest Service". Each record's lineage is
   therefore read from its originator field, so a copy is never counted as
   a second, independent sighting.
-- BLM `BLM_Natl_GTLF` layer 0 (Ground Transportation Linear Features).
+- BLM `BLM_Natl_GTLF_Public_Display` layers 0-7 (Ground Transportation
+  Linear Features), verified live 2026-10-27. BLM retired the single-layer
+  `BLM_Natl_GTLF` service (it now answers 404) and split its routes by
+  what each is managed for: 0 and 1 roads for public and limited public
+  motorized use, 2 and 3 the same for trails, 4 non-motorized and 5
+  non-mechanized trails, 6 trails not assessed for public use, 7 trails
+  managed for public use. All eight are read. The kind and the managed-for
+  class come from the layer; the old observed mode of transport is gone,
+  and `PLAN_MODE_TRNSPRT` is kept as detail. Being a public display, it is
+  not known to carry routes BLM has designated closed - the ones most
+  likely missing from OSM.
 
 None needs a credential. All return at most 2000 records a page and support
 `resultOffset` pagination.
@@ -56,14 +66,15 @@ CACHE_FILENAME = "agency_ways.json"
 
 #: Bumped when a layer, a field or the record shape changes, so a staged
 #: directory fetched under the old rules is fetched again, not misread.
-AGENCY_QUERY_VERSION = 1
+AGENCY_QUERY_VERSION = 2
 
 PAGE_SIZE = 2000
 MAX_PAGES = 20
 
 _USFS = "https://apps.fs.usda.gov/arcx/rest/services/EDW"
 _TNM = "https://carto.nationalmap.gov/arcgis/rest/services/transportation/MapServer"
-_BLM = "https://gis.blm.gov/arcgis/rest/services/transportation/BLM_Natl_GTLF/MapServer"
+_BLM = ("https://gis.blm.gov/arcgis/rest/services/transportation/"
+        "BLM_Natl_GTLF_Public_Display/MapServer")
 
 
 def _text(value) -> str | None:
@@ -144,19 +155,47 @@ def _usgs_road(attributes: dict, *, closed_layer: bool) -> dict:
     }
 
 
-def _blm(attributes: dict) -> dict:
-    mode = _text(attributes.get("OBSRVE_MODE_TRNSPRT"))
-    motorized = bool(mode) and mode.lower().startswith("motorized")
+#: BLM access restrictions that restrict nothing, in any of the cases BLM
+#: writes them ("None", "UNKNOWN", "All").
+_BLM_NO_RESTRICTION = frozenset({"none", "unknown", "all"})
+
+
+def _blm(attributes: dict, *, kind: str, managed_for: str,
+         limited: str | None = None) -> dict:
+    """A BLM route. `kind`, `managed_for` and `limited` come from the layer
+    it was read from: the Public Display service files each route under
+    what it is managed for."""
     restriction = _text(attributes.get("PLAN_ACCESS_RSTRCT"))
+    if restriction and restriction.lower() in _BLM_NO_RESTRICTION:
+        restriction = None
+    status = [part for part in (limited, restriction and restriction.lower()) if part]
     accuracy = attributes.get("ACCURACY_FT")
     return {
-        "kind": "road" if motorized else "trail", "lineage": "blm",
+        "kind": kind, "lineage": "blm",
         "name": _text(attributes.get("ROUTE_PRMRY_NM")), "ref": _text(attributes.get("FAMS_ID")),
-        "status": restriction if restriction and restriction.lower() != "unknown" else None,
-        "detail": {"mode": mode, "surface": _text(attributes.get("OBSRVE_SRFCE_TYPE")),
+        "status": "; ".join(status) or None,
+        "detail": {"managed_for": managed_for,
+                   "mode": _text(attributes.get("PLAN_MODE_TRNSPRT")),
+                   "surface": _text(attributes.get("OBSRVE_SRFCE_TYPE")),
                    "accuracy_ft": accuracy if isinstance(accuracy, (int, float))
                    and accuracy > 0 else None},
     }
+
+
+_BLM_FIELDS = ("ROUTE_PRMRY_NM,FAMS_ID,PLAN_MODE_TRNSPRT,OBSRVE_SRFCE_TYPE,"
+               "PLAN_ACCESS_RSTRCT,ACCURACY_FT")
+
+#: (layer id, kind, what BLM manages it for, the status that class implies).
+_BLM_LAYERS = (
+    (0, "road", "public motorized use", None),
+    (1, "road", "limited public motorized use", "limited public motorized use"),
+    (2, "trail", "public motorized use", None),
+    (3, "trail", "limited public motorized use", "limited public motorized use"),
+    (4, "trail", "public non-motorized use", None),
+    (5, "trail", "public non-mechanized use", None),
+    (6, "trail", "not assessed for public use", "not assessed for public use"),
+    (7, "trail", "public use", None),
+)
 
 
 @dataclass(frozen=True)
@@ -186,10 +225,11 @@ SOURCES: dict[str, tuple[Layer, ...]] = {
               _usfs_trail, "Forest Service system trails"),
     ),
     "blm": (
-        Layer(f"{_BLM}/0",
-              "ROUTE_PRMRY_NM,FAMS_ID,OBSRVE_MODE_TRNSPRT,OBSRVE_SRFCE_TYPE,"
-              "PLAN_ACCESS_RSTRCT,ACCURACY_FT",
-              _blm, "BLM ground transportation (GTLF)"),
+        *(Layer(f"{_BLM}/{layer}", _BLM_FIELDS,
+                functools.partial(_blm, kind=kind, managed_for=managed_for,
+                                  limited=limited),
+                f"BLM {kind}s ({managed_for})")
+          for layer, kind, managed_for, limited in _BLM_LAYERS),
     ),
     "usgs_trails": (
         Layer(f"{_TNM}/37", "name,trailnumber,trailtype,sourceoriginator",

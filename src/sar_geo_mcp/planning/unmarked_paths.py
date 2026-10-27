@@ -1,7 +1,8 @@
 """Unmarked roads and trails on staged ground, from every source at once.
 
-The sources are the land agencies' records (`agency_ways.py`) and the
-elevation (`terrain/lineaments.py`). "Unmarked" is measured against the
+The sources are the land agencies' records (`agency_ways.py`), checked
+against NAIP imagery (`imagery.py`), and - experimental, only when named -
+the elevation (`terrain/lineaments.py`). "Unmarked" is measured against the
 staged OpenStreetMap ways - what almost every map app, CalTopo's base layers
 among them, draws. The fusion and its rules are in `terrain/unmarked.py`;
 this module holds the I/O: the staged directory, the agency fetches, the
@@ -50,9 +51,23 @@ from .agency_ways import AGENCY_SOURCES, SOURCES, load_agency_ways
 from .imagery import IMAGERY_ASSUMPTIONS
 
 #: "imagery" is not a line source: it checks every candidate the others
-#: found for a bare corridor in NAIP (see `imagery.py`) and counts as an
-#: independent sighting where it finds one.
+#: found for a bare corridor in NAIP (see `imagery.py`) and reports it as
+#: `imagery.bare`. Since 0.42.0 it never counts as a sighting: a dry creek
+#: bed or a bare ridge passes it as readily as a road.
 ALL_SOURCES = (*AGENCY_SOURCES, "terrain", "imagery")
+
+#: What a call reads when it names no sources: the agency inventories and the
+#: imagery check on their lines. "terrain" is experimental and read only when
+#: named: on four public-land areas (6.3 m ground, 2026-10-27) 82-99% of its
+#: benches sat on a crest or in a channel, where the bench test fires as
+#: readily as on a cut road.
+DEFAULT_SOURCES = (*AGENCY_SOURCES, "imagery")
+
+TERRAIN_EXPERIMENTAL = (
+    "terrain is experimental: its benches are ground flatter than the slope "
+    "around it, which a ridge crest or a channel bottom is as much as a cut "
+    "road. On four public-land areas 82-99% of them sat on a crest or in a "
+    "channel. Read terrain_only lines as a place to look, never as a path")
 
 EXPORTS_DIRNAME = "exports"
 EXPORT_FILENAME = "unmarked-paths.geojson"
@@ -91,8 +106,13 @@ UNMARKED_ASSUMPTIONS = {
                      "once with them"),
     "tiers": {"corroborated": "two or more independent lineages saw it",
               "agency_record": "one land agency's inventory only",
-              "terrain_only": ("a bench in the elevation only - read the noise "
-                               "floor before the list")},
+              "terrain_only": ("a bench in the elevation only (experimental "
+                               "terrain source) - read the noise floor before "
+                               "the list")},
+    "default_sources": ("the agency inventories, with imagery as a check on "
+                        "their lines; terrain only when named, as experimental"),
+    "imagery_role": ("a check reported as imagery.bare on each line, never a "
+                     "sighting: it does not change a tier or the order"),
     "close_to_mapped": (f"median distance under {CLOSE_TO_MAPPED_M:.0f} m from a "
                         "mapped way: may be that way, drawn elsewhere by another "
                         "survey, rather than a second path"),
@@ -107,7 +127,7 @@ UNMARKED_ASSUMPTIONS = {
 
 
 def _check_sources(sources: list[str] | None) -> list[str]:
-    chosen = list(ALL_SOURCES) if not sources else list(dict.fromkeys(sources))
+    chosen = list(DEFAULT_SOURCES) if not sources else list(dict.fromkeys(sources))
     unknown = [source for source in chosen if source not in ALL_SOURCES]
     if unknown:
         raise ValueError(f"unknown source(s) {unknown}; choose from {list(ALL_SOURCES)}")
@@ -186,7 +206,7 @@ def _description(candidate: dict) -> str:
 def _bridge_description(bridge: dict) -> str:
     target = bridge["to"] or f"mapped way {bridge.get('to_mapped') or '(unnamed)'}"
     parts = [f"{bridge['length_m']:.0f} m across flat ground from {bridge['from']} "
-             f"to {target}, where the bench signal fades at a junction or landing. "
+             f"to {target}, where a line fades out at a junction or landing. "
              f"Steepest {bridge['steepest_deg']:.0f} deg inside."]
     imagery = bridge.get("imagery") or {}
     if imagery.get("bare") is True:
@@ -226,6 +246,10 @@ def unmarked_paths(directory: Path, *, sources: list[str] | None = None,
                    bridges: bool = True, get=None, imagery_get=None) -> dict[str, Any]:
     """Unmarked road and trail candidates on the staged ground, ranked by how
     many independent sources saw each one. See the module docstring.
+
+    `sources` None reads DEFAULT_SOURCES: the agency inventories and the
+    imagery check. "terrain" is read only when named, with a warning that
+    it is experimental.
 
     `limit` bounds the list returned (default DEFAULT_LIMIT, 0 for every
     one); `geojson_limit` bounds the CalTopo file separately, and its
@@ -331,6 +355,7 @@ def unmarked_paths(directory: Path, *, sources: list[str] | None = None,
     ground_km2 = rows * cols * grid.pixel_size_m ** 2 / 1e6
     terrain_summary = None
     if "terrain" in chosen:
+        warnings.append(TERRAIN_EXPERIMENTAL)
         found = find_lineaments(grid.elevation, grid.pixel_size_m,
                                 track_width_m=track_width_m,
                                 min_length_m=min_length_m)
@@ -486,9 +511,9 @@ def unmarked_paths(directory: Path, *, sources: list[str] | None = None,
 
 def _imagery(directory: Path, block: dict, latitude_deg: float, candidates: list[dict],
              per_source: dict, warnings: list[str], *, refresh: bool, get):
-    """Fetch NAIP over the box and test every candidate for a bare corridor.
-    A bare one gains an independent "imagery" sighting. Returns the sampler,
-    or None when no tile could be fetched."""
+    """Fetch NAIP over the box and test every candidate for a bare corridor,
+    recorded as `candidate["imagery"]` - a check, never a sighting. Returns
+    the sampler, or None when no tile could be fetched."""
     from .imagery import NdviSampler, bare_corridor, load_naip
 
     answer = load_naip(directory, block["bbox_3857"], latitude_deg, refresh=refresh, get=get)
@@ -513,10 +538,6 @@ def _imagery(directory: Path, block: dict, latitude_deg: float, candidates: list
             unknown += 1
         elif result["bare"]:
             bare += 1
-            candidate["sightings"].append({
-                "source": "imagery", "lineage": "imagery", "layer": "NAIP bare corridor",
-                "kind": None, "name": None, "ref": None, "status": None,
-                "coverage": result["coverage"]})
     summary.update({"checked": len(candidates) - unknown, "bare": bare,
                     "not_looked_at": unknown})
     per_source["imagery"] = summary

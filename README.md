@@ -95,7 +95,7 @@ own status and the exact feature call that returns the full answer.
 | `slope_stats` | Slope statistics inside one named shape — "quantify that sidewall" |
 | `slope_shading` | CalTopo's slope bands beside this package's own, and the patches where the DEM reads shallower |
 | `shaded_relief` | Terrain to look at, and benches OpenStreetMap has not got - clean and OSM-overlaid, plus measured lineaments |
-| `unmarked_paths` | Roads and trails OpenStreetMap has not got, from Forest Service, BLM and USGS inventories, DEM benches and NAIP imagery at once - each ranked by how many independent sources saw it, closed Forest Service roads included, junction gaps bridged along flat ground, and written to a GeoJSON file CalTopo imports as coloured lines |
+| `unmarked_paths` | Roads and trails OpenStreetMap has not got, from Forest Service, BLM and USGS inventories - closed Forest Service roads included - each checked against NAIP imagery for a corridor still bare on the ground, ranked by how many independent inventories saw it, junction gaps bridged along flat ground, and written to a GeoJSON file CalTopo imports as coloured lines. DEM benches are an experimental source, read only when asked for |
 | `elevation_profile` | Elevation along a drainage centreline — how steep is the channel |
 | `coverage_for` | Coverage and gaps for a staged assignment, from named GPS tracks |
 | `prepare_area` | Stage the ground around a place last seen (point + radius, in m, km, ft, yd or mi) or a polygon; returns an `aoi-` handle that never goes stale, and the area's outline to draw |
