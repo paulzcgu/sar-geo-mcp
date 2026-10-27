@@ -4,6 +4,7 @@ never across an arterial, pairing across water only two at a time."""
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 from shapely.geometry import LineString, Point, Polygon, box, mapping, shape
@@ -12,6 +13,7 @@ from shapely.ops import unary_union
 from sar_geo_mcp.planning.urban import (
     NO_ARTERIALS_WARNING,
     group_blocks,
+    snap_outlines,
     street_links,
     urban_assignments,
     urban_params,
@@ -402,7 +404,7 @@ def test_the_urban_set_holds_assignment_candidates(tmp_path):
     directory = _town_dir(tmp_path)
     parcels, roofs = town()
     params = urban_params(target_ha=2.0, resource_type="ground", max_distance_m=None)
-    assert params == {"method": 3, "target_ha": 2.0, "resource_type": "GROUND",
+    assert params == {"method": 4, "target_ha": 2.0, "resource_type": "GROUND",
                       "max_distance_m": None}
     cset = urban_set(directory, params, handle="aoi-test", norms=None, wms_base_url=WMS,
                      cache_dir=tmp_path / "cache", fetch=fake_fetch(parcels, roofs))
@@ -575,3 +577,88 @@ def test_a_hemmed_join_past_the_ceiling_is_said(monkeypatch, tmp_path):
     (warning,) = assignment["warnings"]
     assert warning.startswith("Elm Court, most of whose ground lies inside this assignment's")
     assert "2.83 ha, past the 2.80 ha (140 % of the target)" in warning
+
+
+def test_neighbours_across_a_street_are_snapped_to_one_shared_edge():
+    """Two assignments a 20 m street apart meet on its middle: no gap, no
+    overlap, one edge. Their outer edges, which face no other assignment,
+    stay where the blocks end."""
+    left, right = box(0, 0, 100, 100), box(120, 0, 220, 100)
+    snapped_left, snapped_right = snap_outlines([left, right], scale=SCALE)
+    assert snapped_left.covers(left) and snapped_right.covers(right)
+    assert snapped_left.intersection(snapped_right).area < 1.0
+    shared = snapped_left.boundary.intersection(snapped_right.boundary).length
+    assert shared > 90.0                               # the street's length, one edge
+    assert snapped_left.union(snapped_right).covers(box(100, 5, 120, 95))
+    # The street is split down its middle.
+    assert snapped_left.covers(Point(105, 50)) and snapped_right.covers(Point(115, 50))
+    # Nothing grows past the outer edges but the mouth of the street, a few
+    # metres where no centreline is known to stop it.
+    for snapped in (snapped_left, snapped_right):
+        min_x, min_y, max_x, max_y = snapped.bounds
+        assert min_x >= -6.0 and max_x <= 226.0 and min_y >= -6.0 and max_y <= 106.0
+
+
+def test_assignments_too_far_apart_are_not_snapped():
+    left, right = box(0, 0, 100, 100), box(300, 0, 400, 100)
+    snapped = snap_outlines([left, right], scale=SCALE)
+    assert snapped[0].symmetric_difference(left).area < 1.0
+    assert snapped[1].symmetric_difference(right).area < 1.0
+
+
+def test_where_two_neighbours_corners_meet_the_ground_beyond_is_left_alone():
+    """Two blocks side by side along one back edge: the street between them
+    is shared, but the open ground beyond their outer edge, near both
+    corners, is no one's - it is not between them."""
+    left, right = box(0, 0, 100, 100), box(110, 0, 210, 100)
+    snapped = snap_outlines([left, right], scale=SCALE)
+    assert not snapped[0].union(snapped[1]).intersects(Point(105, 115))
+
+
+def test_a_pocket_enclosed_by_assignments_is_given_to_the_nearest():
+    """A courtyard no block took, with assignments on every side, is
+    searched by the nearest rather than left a hole."""
+    ring = box(0, 0, 200, 200).difference(box(50, 50, 150, 150))
+    outer = ring.difference(box(0, 0, 100, 200))
+    inner = ring.intersection(box(0, 0, 100, 200))
+    snapped = snap_outlines([outer, inner], scale=SCALE)
+    assert snapped[0].union(snapped[1]).covers(Point(100, 100))
+    assert snapped[0].intersection(snapped[1]).area < 1.0
+
+
+def test_neighbours_either_side_of_a_street_meet_on_its_centreline():
+    """The street's centreline, not the middle of the gap, is the shared
+    edge: OpenStreetMap's line is the boundary a planner draws to."""
+    left, right = box(0, 0, 100, 100), box(120, 0, 220, 100)
+    street = LineString([(114, -50), (114, 150)])
+    snapped_left, snapped_right = snap_outlines([left, right], scale=SCALE, streets=[street])
+    assert snapped_left.intersection(snapped_right).area < 1.0
+    assert snapped_left.covers(Point(111, 50)) and snapped_right.covers(Point(117, 50))
+    shared = snapped_left.boundary.intersection(snapped_right.boundary)
+    assert shared.length > 90.0
+    assert all(abs(x - 114) <= 2.5 for x, _y in shared.envelope.exterior.coords)
+
+
+def test_an_edge_facing_a_street_is_drawn_out_to_its_centreline():
+    """A run's end faces its cross street 10 m away, with no assignment
+    across it: the edge goes to the centreline, and no farther, and runs
+    along the street no farther than the run's own width."""
+    near, far = box(0, 0, 100, 100), box(500, 0, 600, 100)
+    street = LineString([(110, -150), (110, 250)])
+    snapped, _far = snap_outlines([near, far], scale=SCALE, streets=[street])
+    assert snapped.covers(Point(108, 50))
+    assert not snapped.intersects(Point(113, 50))
+    assert not snapped.intersects(Point(108, 125))
+    assert not snapped.intersects(Point(108, -25))
+
+
+def test_a_v_shaped_gap_between_neighbours_is_shared_out():
+    """Two neighbours whose edges open at 60 degrees: the wedge between them,
+    seen from inside, has them only 120 degrees apart, and is still split
+    between them rather than left a slit."""
+    left = Polygon([(0, 0), (0, 100), (50, 100), (50, 0)])
+    right = Polygon([(60, 0), (60 + 100 * math.tan(math.radians(30)), 100), (200, 100),
+                     (200, 0)])
+    snapped = snap_outlines([left, right], scale=SCALE)
+    assert snapped[0].union(snapped[1]).covers(Point(60, 60))
+    assert snapped[0].intersection(snapped[1]).area < 1.0

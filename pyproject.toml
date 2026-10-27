@@ -1169,7 +1169,43 @@ name = "sar-geo-mcp"
 # `folder`. CalTopo has no folder inside a folder, so a feature that already
 # carries one is refused rather than nested. 0.38.0 and 0.39.0 were
 # withdrawn from PyPI; this release replaces them.
-version = "0.39.1"
+# 0.40.0: urban assignments are bounded by streets, as a planner draws them.
+# WHAT WAS WRONG: lot lines were read only 200 m past the search circle, so
+# a street the circle reached was cut off in a straight line where that
+# read stopped, half its lots missing. A street's run was never ended by a
+# cross street - the closing spanned it - so a run the circle touched was
+# kept on past cross street after cross street. The lots at a run's end
+# that face the cross street were filed under it and dropped with it, so
+# the edge stopped at a back fence short of the street. And each assignment
+# stopped at its own back fences and kerbs, so the street between two
+# neighbours was nobody's and their edges did not meet. WHAT CHANGED: a run
+# is cut along every other named street's OpenStreetMap centreline (a lot
+# goes whole to the piece holding most of it), so a block is a street both
+# sides from cross street to cross street; a run the circle keeps takes the
+# corner lots and the row facing its cross street when their own block is
+# not kept. Edges snap to the streets: no ground is given across a
+# centreline (a line of sight to the outline, so a dead end leaks nothing),
+# so neighbours either side of a street meet on it; an edge or a notch
+# facing a street is drawn out to it, straight ahead, with no finger along
+# the street; a pocket or slit mostly surrounded by assignments, or the
+# rest of a city block they mostly cover, goes to the nearest; a
+# boulevard's median goes with the ground beside it; and every outline is simplified as one
+# coverage, so a shared edge is one line. And: when a block the circle keeps runs
+# into the edge of the lot lines read, they are read again twice as far
+# out, up to the 1,000 m planning buffer and never at a coarser pixel; a
+# block within a closing of that edge counts as running into it, since
+# the next lot may be cut too thin to show its roof. `assumptions.margin_m`
+# says how far they were read. Only streets with a lot within 200 m of the
+# area are drawn, so the wider read costs less than its size, and lots left
+# out far beyond the area are no longer counted. Ground between two
+# assignments up to 90 m apart (`snap_gap_m`) with no street through it is
+# split down its middle; an outer back fence facing no other assignment
+# stays where it is. `area_ha` now includes the street ground taken. The
+# block method is 4, so a set made by 0.39 is made again rather than read
+# back. A call that has to read wider takes longer: half a mile across, 14
+# to 32 s in four towns (a bayside suburb, a lagoon town, a hillside town
+# and a lakeside one) rather than about 6.
+version = "0.40.0"
 description = "CalTopo interaction hub and geo-computing accessories for SAR"
 license = "MIT"
 license-files = ["LICENSE"]

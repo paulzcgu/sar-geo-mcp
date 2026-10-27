@@ -94,8 +94,11 @@ def register(mcp, ctx) -> None:
                               marker_color: str = "#FFFFFF") -> dict[str, Any]:
         """Populated blocks in town (urban and suburban ground only): the
         built-up lots along each street, both sides and the street between
-        them, outlined as one block per street - the block a planner draws
-        by hand on CalTopo's parcel layer for an urban search.
+        them, from cross street to cross street, outlined as one block -
+        the block a planner draws by hand on CalTopo's parcel layer for an
+        urban search. A block the area reaches is kept whole, out to its
+        cross streets, with the corner lots and the row of houses facing a
+        cross street at its end.
 
         Call `prepare_area` first over the town and pass its handle; the
         area must be under about 8 km across. Lots are read from CalTopo's
@@ -184,7 +187,8 @@ def register(mcp, ctx) -> None:
         beyond the nearest street, never cut through a street's lots.
 
         THE RULES. Each block is one street, both sides, back fence to back
-        fence, and an assignment is whole blocks: a team always has both
+        fence, from cross street to cross street, and an assignment is
+        whole blocks: a team always has both
         sides of its streets, and its edges are back fences or streets.
         Blocks merge smallest first ALONG THE STREETS THAT JOIN THEM - a
         cul-de-sac into the road it opens onto, two runs of one street -
@@ -197,7 +201,14 @@ def register(mcp, ctx) -> None:
         then pair across water (two isles a team drives between), two at
         most, drawn as one polygon by a thin strip for the drawing only. No
         two assignments share ground; holes are filled unless another
-        assignment is inside. On ground staged before road classes were
+        assignment is inside. Edges snap to the streets, as on a
+        hand-drawn plan: two assignments either side of a street meet on
+        its OpenStreetMap centreline, an edge facing a street is drawn out
+        to it, and ground between two assignments with no street through it
+        is split down its middle; `area_ha` includes the street ground. An
+        outer back fence facing no other assignment stays where it is. A
+        street the circle reaches is read to its end, up to 1,000 m past
+        the area. On ground staged before road classes were
         kept, arterials are unknown and a warning says so.
 
         Returns summaries WITHOUT geometry, nearest the centre first: id,

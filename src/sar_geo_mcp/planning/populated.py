@@ -63,7 +63,15 @@ them (which spans the street between the two sides and the outline pixels
 between neighbours), holes filled, and then every lot belonging to ANOTHER
 block cut back out so two blocks never claim the same house. A street whose
 lots fall into separate runs - a park between them, a cross street with no
-houses on it - gives one block per run. A run with fewer than `min_parcels`
+houses on it - gives one block per run, and so does every cross street:
+the run is cut along each other named street's OpenStreetMap centreline,
+so a team's street both sides runs from cross street to cross street, and
+the run past the next one is a block of its own the area may not reach. A
+lot is never cut: it goes whole to the piece holding most of it. A run the
+area keeps is finished out to its cross streets: a lot at its end filed
+under the cross street (a corner lot, a row facing the cross street) whose
+own block the area does not reach is searched with the run it touches,
+when it fronts the run's street or one crossing it. A run with fewer than `min_parcels`
 houses is no block of its own: it is searched with the block whose lots it
 touches (or, failing that, whose ground comes within the closing's reach),
 and that block's warnings say so; so is a piece of a run the cut left with
@@ -134,15 +142,21 @@ MAX_PIXEL_M = 2.0
 #: town, already a big urban search.
 MAX_SIDE_PX = 4096
 
-#: Ground metres of panel kept beyond the staged area on every side, so a
-#: street block the area boundary crosses is read whole - both sides of the
-#: street out to the back fences - rather than cut where the ring falls. A
-#: run of lots reaching further than this past the ring is still cut, and
-#: says so (`clipped_at_edge`).
+#: Ground metres of panel first read beyond the staged area on every side,
+#: so a street block the area boundary crosses is read whole - both sides of
+#: the street out to the back fences - rather than cut where the ring falls.
 MARGIN_M = 200.0
+#: A block the circle keeps that still runs into the panel's edge is read
+#: again over a panel twice as wide, until none does or the margin reaches
+#: this: the staged ground's planning buffer, past which there are no
+#: OpenStreetMap streets to give a lot to. The panel never grows coarser
+#: than the pixel asked for. A run of lots reaching further than that is
+#: still cut, and says so (`clipped_at_edge`).
+MAX_MARGIN_M = 1000.0
 
-#: The block method a set id is hashed over (`populated_params`).
-METHOD = 3
+#: The block method a set id is hashed over (`populated_params`). 4 (0.40.0):
+#: a block the ring keeps is read out to its end, not cut 200 m past the ring.
+METHOD = 4
 
 #: A lot with no building on it is searched with its street when it touches
 #: that street's built-up lots: a vacant lot, a yard parcel, a garden - a
@@ -210,9 +224,10 @@ __all__ = ["check_params", "panel_pixel_m", "populated_areas", "populated_params
 # panels
 
 
-def _panel_grid(subject_geometry: dict, pixel_m: float) -> tuple[Any, int, int, float, float]:
+def _panel_grid(subject_geometry: dict, pixel_m: float, margin_m: float = MARGIN_M
+                ) -> tuple[Any, int, int, float, float]:
     """(affine transform, width_px, height_px, pixel_m actually used, ground
-    metres per Mercator unit) for a panel over the subject plus MARGIN_M,
+    metres per Mercator unit) for a panel over the subject plus `margin_m`,
     north-up in EPSG:3857.
 
     Raises ValueError when even MAX_PIXEL_M would need more than
@@ -226,7 +241,7 @@ def _panel_grid(subject_geometry: dict, pixel_m: float) -> tuple[Any, int, int, 
     area = shapely_transform(to_3857.transform, shapely_shape(subject_geometry))
     _lon, latitude = geometry_centroid(subject_geometry)
     scale = ground_meters_per_mercator_unit(latitude)
-    margin = MARGIN_M / scale
+    margin = margin_m / scale
     west, south, east, north = area.bounds
     west, south, east, north = west - margin, south - margin, east + margin, north + margin
     span_m = max(east - west, north - south) * scale
@@ -496,6 +511,99 @@ def _one_piece_each(blocks_raw: list[dict], *, regions: np.ndarray, lot_mask: np
     return pieces
 
 
+def _corner_lots(blocks: list[dict], *, regions: np.ndarray, outline: np.ndarray,
+                 area_cells: np.ndarray, fronts: dict[int, set[int]], street_of: np.ndarray,
+                 crossing: set[frozenset], slices, pad: int) -> int:
+    """Finish each kept run out to its cross streets, in place, and return
+    how many lots moved.
+
+    A run a team is sent down goes from cross street to cross street. The
+    lots at its end that front the cross street - a corner lot filed under
+    it, a row of houses facing it behind the run's last lots - belong to the
+    cross street's block; where the area does not reach that block, they
+    would be searched by no one, and the run's edge would stop at a back
+    fence short of the street. Such a lot goes to the kept block it touches
+    when it fronts that block's street or a street crossing it (`crossing`,
+    pairs of street numbers), in passes, so a row facing the cross street
+    joins lot by lot; the cross street's far side, across its right-of-way,
+    never touches the run and stays out, and so does a back-fence
+    neighbour facing a parallel street."""
+    def kept(block) -> bool:
+        r0, r1, c0, c1 = block["window"]
+        return bool((block["mask"] & area_cells[r0:r1, c0:c1]).any())
+
+    flags = [kept(block) for block in blocks]
+    keepers = [block for block, flag in zip(blocks, flags) if flag and block["kind"] == "street"]
+    moved = 0
+
+    def joins(lot: int, keeper) -> bool:
+        street = keeper["street_index"]
+        if not street:
+            return False
+        if street in fronts.get(lot, ()):
+            return True
+        return frozenset((street, int(street_of[lot]))) in crossing
+
+    changed = True
+    while changed:
+        changed = False
+        for block, flag in zip(blocks, flags):
+            if flag or block["kind"] != "street":
+                continue
+            for lot in list(block["members"]):
+                if _move_lot(lot, block, keepers, joins, regions=regions, outline=outline,
+                             slices=slices, pad=pad):
+                    moved += 1
+                    changed = True
+    return moved
+
+
+def _move_lot(lot: int, block: dict, keepers: list[dict], joins, *, regions: np.ndarray,
+              outline: np.ndarray, slices, pad: int) -> bool:
+    """Move `lot` from `block` into the kept block it touches most that
+    `joins` allows, in place; whether it moved."""
+    from scipy import ndimage
+
+    height, width = regions.shape
+    window = slices[lot - 1]
+    if window is None:
+        return False
+    l0, l1 = max(window[0].start - 3, 0), min(window[0].stop + 3, height)
+    m0, m1 = max(window[1].start - 3, 0), min(window[1].stop + 3, width)
+    # Three cells reach across a lot line into the kept block's ground,
+    # never across a street's right-of-way.
+    near = ndimage.binary_dilation(regions[l0:l1, m0:m1] == lot, iterations=3)
+    best, most = None, 0
+    for keeper in keepers:
+        if not joins(lot, keeper):
+            continue
+        r0, r1, c0, c1 = keeper["window"]
+        a0, a1, b0, b1 = max(l0, r0), min(l1, r1), max(m0, c0), min(m1, c1)
+        if a0 >= a1 or b0 >= b1:
+            continue
+        touch = int((near[a0 - l0:a1 - l0, b0 - m0:b1 - m0]
+                     & keeper["mask"][a0 - r0:a1 - r0, b0 - c0:b1 - c0]).sum())
+        if touch > most:
+            best, most = keeper, touch
+    if best is None:
+        return False
+    # The lot, and its own outline, join the kept block's ground.
+    r0, r1, c0, c1 = best["window"]
+    n0, n1 = min(r0, max(l0 - pad, 0)), max(r1, min(l1 + pad, height))
+    q0, q1 = min(c0, max(m0 - pad, 0)), max(c1, min(m1 + pad, width))
+    mask = np.zeros((n1 - n0, q1 - q0), dtype=bool)
+    mask[r0 - n0:r1 - n0, c0 - q0:c1 - q0] = best["mask"]
+    lot_cells = regions[n0:n1, q0:q1] == lot
+    mask |= lot_cells | (ndimage.binary_dilation(lot_cells) & outline[n0:n1, q0:q1])
+    best["mask"], best["window"] = mask, (n0, n1, q0, q1)
+    best["members"] = best["members"] + [lot]
+    best["corner_lots"] = best.get("corner_lots", 0) + 1
+    o0, o1, p0, p1 = block["window"]
+    block["mask"] = block["mask"] & ~(regions[o0:o1, p0:p1] == lot)
+    block["members"] = [m for m in block["members"] if m != lot]
+    return True
+
+
 def marker_colour(colour: str) -> str:
     """`colour` as CalTopo writes a marker colour, `#RRGGBB` upper case; a
     leading `#` may be left off. Anything else is refused rather than passed
@@ -641,6 +749,13 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
     "warnings"}`; each block carries its polygon (`geometry`, WGS84). The
     MCP tool saves them as a candidate set and returns summaries.
 
+    The lot lines are read MARGIN_M past the area first. When a block the
+    area keeps runs into the edge of what was read, they are read again
+    over a margin twice as wide, up to MAX_MARGIN_M and never at a coarser
+    pixel, so a street the circle reaches is drawn to its end rather than
+    cut where the panel stopped. `assumptions.margin_m` says how far they
+    were read.
+
     `building_markers` - off unless asked for - adds `markers` to every
     block: one CalTopo Marker per building in it, CalTopo's house symbol
     (`hut`) in `marker_color`, white by default, standing on the roof. The
@@ -652,6 +767,43 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
     out of range, an area too big to read lot lines over, no WMS token, or
     a parcel or structures panel that cannot be had.
     """
+    arguments = dict(pixel_m=pixel_m, max_parcel_area_m2=max_parcel_area_m2,
+                     min_building_m2=min_building_m2,
+                     large_parcel_min_cover=large_parcel_min_cover, bridge_m=bridge_m,
+                     min_parcels=min_parcels, max_distance_m=max_distance_m, limit=limit,
+                     building_markers=building_markers, marker_color=marker_color,
+                     wms_base_url=wms_base_url, cache_dir=cache_dir, fetch=fetch)
+    margin = MARGIN_M
+    while True:
+        result = _populated_areas(directory, margin_m=margin, **arguments)
+        if margin >= MAX_MARGIN_M or not any(
+                block["facts"]["clipped_at_edge"] for block in result["blocks"]):
+            break
+        wider = min(margin * 2, MAX_MARGIN_M)
+        subject_geometry = read_subject(Path(directory)).get("geometry") or {}
+        try:
+            coarser = (_panel_grid(subject_geometry, pixel_m, wider)[3]
+                       > result["assumptions"]["pixel_m"] + 1e-3)
+        except ValueError:
+            coarser = True
+        if coarser:
+            break
+        margin = wider
+    result["assumptions"]["margin_m"] = margin
+    return result
+
+
+def _populated_areas(directory, *, margin_m: float, pixel_m: float = 1.0,
+                    max_parcel_area_m2: float = 4047.0,
+                    min_building_m2: float = 30.0,
+                    large_parcel_min_cover: float = 0.10,
+                    bridge_m: float = 12.0, min_parcels: int = 3,
+                    max_distance_m: float | None = None, limit: int = 0,
+                    building_markers: bool = False,
+                    marker_color: str = DEFAULT_MARKER_COLOR,
+                    wms_base_url: str | None = None, cache_dir: Path | None = None,
+                    fetch=None) -> dict[str, Any]:
+    """`populated_areas` over a panel read `margin_m` past the area."""
     import json
 
     from pyproj import Geod, Transformer
@@ -679,7 +831,8 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
     if centre is None:
         raise ValueError("the staged ground has no readable subject area")
     centre_lon, centre_lat = centre
-    transform, width, height, used_m, scale = _panel_grid(subject_geometry, pixel_m)
+    transform, width, height, used_m, scale = _panel_grid(subject_geometry, pixel_m,
+                                                          margin_m)
     shape = (height, width)
     cell_m2 = used_m * used_m
     warnings: list[str] = []
@@ -795,6 +948,9 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
     # ---- which street each lot fronts
     slices = ndimage.find_objects(regions)
     street_of = np.zeros(count + 1, dtype=np.int32)       # 0: no street
+    # Every street a lot's frontage touches, not only the one it is filed
+    # under: a corner lot fronts two (see the corner lots, below).
+    fronts: dict[int, set[int]] = {}
     if street_names:
         burned = _burn([(line, index + 1) for index, name in enumerate(street_names)
                         for line in streets[name]], transform, shape)
@@ -816,12 +972,14 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
             votes = nearest_street[rows, cols][front]
             if votes.size:
                 street_of[region_id] = int(np.bincount(votes).argmax())
+                fronts[int(region_id)] = set(np.unique(votes).tolist()) - {0}
                 continue
             edge = ndimage.binary_dilation(mine, iterations=2) & ~mine
             close = edge & (distance_px[rows, cols] <= reach_px)
             votes = nearest_street[rows, cols][close]
             if votes.size:
                 street_of[region_id] = int(np.bincount(votes).argmax())
+                fronts[int(region_id)] = set(np.unique(votes).tolist()) - {0}
                 continue
             inside = distance_px[rows, cols][mine]
             if inside.size and inside.min() <= ceiling_px:
@@ -856,8 +1014,45 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
     for region_id in vacant_ids:
         vacant_by_street.setdefault(int(street_of[region_id]), []).append(int(region_id))
     orphans: list[dict] = []
+    # Only a street with a lot within MARGIN_M of the area can draw a block
+    # the area keeps; one wholly farther out, on a panel read wider to
+    # finish a long street, is no block of this answer and is not drawn.
+    from rasterio.features import rasterize
+
+    area_cells = rasterize([(area_3857, 1)], out_shape=shape, transform=transform, fill=0,
+                           dtype="uint8") > 0
+    near_area = ndimage.distance_transform_edt(~area_cells) * used_m <= MARGIN_M
+    lot_near = np.bincount(regions[near_area], minlength=count + 1) > 0
+
+    # Each street's run is cut where another named street crosses it: a
+    # street both sides is one team's from cross street to cross street, and
+    # the run past the next cross street is a block of its own.
+    from shapely import STRtree
+
+    named_lines = [(index + 1, line) for index, name in enumerate(street_names)
+                   for line in streets[name]]
+    line_tree = STRtree([line for _index, line in named_lines]) if named_lines else None
+
+    def cross_streets(street_index: int, r0: int, r1: int, c0: int, c1: int) -> np.ndarray:
+        """Cells of every named street but `street_index` in the window."""
+        from affine import Affine
+        from shapely.geometry import box
+
+        if line_tree is None:
+            return np.zeros((r1 - r0, c1 - c0), dtype=bool)
+        local_transform = transform @ Affine.translation(c0, r0)
+        west, north = local_transform * (0, 0)
+        east, south = local_transform * (c1 - c0, r1 - r0)
+        hits = line_tree.query(box(west, south, east, north))
+        lines = [(named_lines[k][1], 1) for k in hits if named_lines[k][0] != street_index]
+        if not lines:
+            return np.zeros((r1 - r0, c1 - c0), dtype=bool)
+        return rasterize(lines, out_shape=(r1 - r0, c1 - c0), transform=local_transform,
+                         fill=0, all_touched=True, dtype="uint8") > 0
 
     for street_index, built_ids in sorted(groups.items()):
+        if not lot_near[built_ids].any():
+            continue
         # The street's vacant lots that touch its built-up lots (across a
         # lot line or the street) join it: one layer, so an empty stretch
         # of street past the last house is not carried along.
@@ -876,10 +1071,25 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
         # Each lot's own outline is part of it: dilate one cell into walls only.
         mine = mine | (ndimage.binary_dilation(mine) & outline[r0:r1, c0:c1])
         closed = ndimage.binary_fill_holes(_close(mine, bridge_px))
-        runs, n_runs = ndimage.label(closed)
-        for run in range(1, n_runs + 1):
-            run_mask = runs == run
-            members = [i for i in ids if np.any(run_mask & (local == i))]
+        # Cut along the cross streets. A lot is never cut: OpenStreetMap's
+        # centreline can run 10-15 m off the parcel map, through a corner
+        # lot, so each lot goes whole to the piece holding most of it.
+        runs, n_runs = ndimage.label(closed & ~cross_streets(street_index, r0, r1, c0, c1))
+        home: dict[int, list[int]] = {}
+        for i in ids:
+            votes = np.bincount(runs[local == i], minlength=n_runs + 1)
+            votes[0] = 0
+            if votes.any():
+                home.setdefault(int(votes.argmax()), []).append(i)
+        lot_cells = np.isin(local, ids)
+        for run, members in sorted(home.items()):
+            own_lots = np.isin(local, members)
+            run_mask = ((runs == run) | own_lots) & ~(lot_cells & ~own_lots)
+            # The piece's ground that the cut left touching it only through
+            # a lot it gave up is not its own.
+            parts, _n = ndimage.label(run_mask)
+            keep = np.unique(parts[own_lots])
+            run_mask = np.isin(parts, keep[keep > 0])
             if sum(1 for i in members if built[i]) < min_parcels:
                 # Too few houses for a block of their own: searched with
                 # the block they touch, below, rather than left out.
@@ -890,6 +1100,8 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
                                "members": members, "window": (r0, r1, c0, c1),
                                "mask": run_mask})
     for region_id in large_ids:
+        if not lot_near[region_id]:
+            continue
         r0, r1, c0, c1 = bounds([int(region_id)])
         local = regions[r0:r1, c0:c1]
         mine = local == region_id
@@ -905,9 +1117,22 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
     # of the touch - not a block's street ground, which the nearer block
     # takes first and would leave the orphan a piece of its own; failing
     # that the most ground within the closing's reach.
+    member_of = np.zeros(count + 1, dtype=bool)
+
     def contact(orphan, pool, iterations, lots_only):
-        o0, o1, p0, p1 = orphan["window"]
-        grown = ndimage.binary_dilation(orphan["mask"], iterations=iterations)
+        if not orphan["mask"].any():
+            return None
+        # Read over the run's own cells and the reach round them, not the
+        # whole street's window it was cut from.
+        rows, cols = np.nonzero(orphan["mask"])
+        w0, w1, v0, v1 = orphan["window"]
+        a0, a1 = max(rows.min() - iterations - 1, 0), min(rows.max() + iterations + 2, w1 - w0)
+        d0, d1 = max(cols.min() - iterations - 1, 0), min(cols.max() + iterations + 2, v1 - v0)
+        o0, o1, p0, p1 = w0 + a0, w0 + a1, v0 + d0, v0 + d1
+        # `iterations` cross-shaped dilations, as a taxicab distance: the
+        # same cells, without a pass per iteration.
+        grown = ndimage.distance_transform_cdt(~orphan["mask"][a0:a1, d0:d1],
+                                               metric="taxicab") <= iterations
         best, most = None, 0
         for block in pool:
             if block is orphan:
@@ -917,8 +1142,12 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
             if r0 >= r1 or c0 >= c1:
                 continue
             theirs = block["mask"][r0 - b0:r1 - b0, c0 - q0:c1 - q0]
+            if not theirs.any():
+                continue
             if lots_only:
-                theirs = theirs & np.isin(regions[r0:r1, c0:c1], block["members"])
+                member_of[block["members"]] = True
+                theirs = theirs & member_of[regions[r0:r1, c0:c1]]
+                member_of[block["members"]] = False
             touch = int((grown[r0 - o0:r1 - o0, c0 - p0:c1 - p0] & theirs).sum())
             if touch > most:
                 best, most = block, touch
@@ -956,7 +1185,10 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
         if len(still) == len(waiting):
             break
         waiting = still
-    left_out += sum(1 for orphan in waiting for i in orphan["members"] if built[i])
+    # Counted only near the area: a short run far out, on a panel read wider
+    # to finish a long street, is no lot this answer left out.
+    left_out += sum(1 for orphan in waiting if lot_near[orphan["members"]].any()
+                    for i in orphan["members"] if built[i])
 
     blocks = _one_piece_each(blocks_raw, regions=regions, lot_mask=lot_mask,
                              block_owner=block_owner, transform=transform,
@@ -970,6 +1202,21 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
         if best is not None:
             join(best, piece)
             blocks.remove(piece)
+    # Streets that cross or meet (within a junction's reach): a run's
+    # cross streets.
+    from shapely.ops import unary_union
+
+    crossing: set[frozenset] = set()
+    joined = {index + 1: unary_union(streets[name]) for index, name in enumerate(street_names)}
+    junction = 15.0 / scale
+    for a, line_a in joined.items():
+        grown = line_a.buffer(junction)
+        for b, line_b in joined.items():
+            if a < b and grown.intersects(line_b):
+                crossing.add(frozenset((a, b)))
+    _corner_lots(blocks, regions=regions, outline=outline, area_cells=area_cells,
+                 fronts=fronts, street_of=street_of, crossing=crossing, slices=slices,
+                 pad=pad)
     block_owner[:] = 0
     for number, block in enumerate(blocks, start=1):
         block_owner[block["members"]] = number
@@ -1009,7 +1256,13 @@ def populated_areas(directory, *, pixel_m: float = 1.0,
         members = block["members"]
         street = street_names[block["street_index"] - 1] if block["street_index"] else None
         lot_areas = area_m2[members]
-        edge_cut = bool(border[members].any())
+        # A lot cut by the panel's edge, or the block's ground within a
+        # closing of it: the next lot may be beyond the edge, too little of
+        # it read to show its roof.
+        rows, cols = np.nonzero(block["mask"])
+        edge_cut = bool(border[members].any()) or bool(rows.size and min(
+            (rows + r0).min(), height - 1 - (rows + r0).max(),
+            (cols + c0).min(), width - 1 - (cols + c0).max()) <= bridge_px)
         facts = {
             "street": street,
             "parcels": int(built[members].sum()),

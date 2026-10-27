@@ -942,7 +942,13 @@ across - lot lines are read at 1 m) and it returns one block per street:
   so no house is in two. A lot belongs to the named OpenStreetMap street it
   has the most edge along, so a corner lot can land on the street its address
   is not on. A street whose lots fall into separate runs gives one block per
-  run, numbered; a run under `min_parcels` (3) houses joins the block whose
+  run, numbered, and every cross street ends a run: it is cut along each
+  other named street's OpenStreetMap centreline (a lot is never cut, but
+  goes whole to the piece holding most of it), so a block is a street both
+  sides from cross street to cross street. A run the circle keeps is
+  finished out to its cross streets - a corner lot or a row facing the
+  cross street, filed under a block the circle does not reach, joins the
+  run it touches; a run under `min_parcels` (3) houses joins the block whose
   lots it touches, and only one touching none is left out, counted in the
   summary. A vacant lot touching its street's houses is searched with them.
 - **A big lot that is mostly roof is its own block** (`axis`
@@ -990,7 +996,23 @@ round a residential street at 11.7 ha, 65 blocks became
 14 assignments of 3.9 to 16.2 ha, median 11.0, and the smallest is a pocket
 boxed in by two boulevards. Pass `max_distance_m` (the radius) to keep the
 blocks of the search circle: every block the circle reaches is kept whole,
-out to the back fences beyond the nearest street.
+out to the back fences beyond the nearest street - and out to the end of
+its street: lot lines are read 200 m past the area, and again twice as far
+while a kept block runs into the edge of what was read, up to the 1,000 m
+planning buffer (`assumptions.margin_m`). Edges snap to the streets, as on
+a hand-drawn CalTopo plan (`snap_outlines`): OpenStreetMap centrelines are
+barriers no ground is given across, so two assignments either side of a
+street meet on its centreline; an edge facing a street within 30 m is drawn
+out to it, straight ahead of the edge (no finger runs along the street past
+the run), as is a notch opening onto one; a pocket or slit most of whose
+surroundings the assignments already cover goes to the nearest one in
+sight, and so does the rest of a city block they mostly cover; centrelines
+are run on 15 m past their ends, closing the gap OpenStreetMap leaves at a
+T junction; a boulevard's median goes with the ground beside it; and ground between two assignments up to 90 m apart
+(`snap_gap_m`) with no street through it - a fence-line strip - is split
+down its middle. No gap, no overlap, and every edge simplified as one
+coverage, so a shared edge is one line. An outer back fence facing no other
+assignment stays where it is. `area_ha` includes the street ground taken.
 
 `caltopo_export(handle, set_id)` writes any candidate set - urban
 assignments, populated blocks, hasty lines - as a GeoJSON file CalTopo
