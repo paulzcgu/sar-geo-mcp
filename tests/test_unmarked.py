@@ -463,7 +463,7 @@ def test_imagery_that_cannot_be_read_is_not_looked_at(tmp_path):
     def down(url, params, timeout):
         raise httpx.ConnectError("NAIP is down")
 
-    import sar_geo_mcp.planning.imagery as imagery
+    import sar_geo_mcp.sources.naip as imagery
     imagery_sleep = imagery.time.sleep
     imagery.time.sleep = lambda seconds: None
     try:
@@ -498,7 +498,7 @@ def test_imagery_tiles_are_cached_with_the_staging(tmp_path):
 
 
 def test_the_tile_grid_coarsens_rather_than_exceed_its_cap():
-    from sar_geo_mcp.planning.imagery import MAX_TILES, tile_grid
+    from sar_geo_mcp.sources.naip import MAX_TILES, tile_grid
 
     small, pixel_small = tile_grid((0, 0, 3000, 3000), 0.0)
     assert pixel_small == 1.0 and len(small) == 9

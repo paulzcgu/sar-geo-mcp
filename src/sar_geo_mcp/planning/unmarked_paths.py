@@ -1,7 +1,7 @@
 """Unmarked roads and trails on staged ground, from every source at once.
 
 The sources are the land agencies' records (`sources/agency.py`), checked
-against NAIP imagery (`imagery.py`), and - experimental, only when named -
+against NAIP imagery (`sources/naip.py`, read by `imagery.py`), and - experimental, only when named -
 the elevation (`terrain/lineaments.py`). "Unmarked" is measured against the
 staged OpenStreetMap ways - what almost every map app, CalTopo's base layers
 among them, draws. The fusion and its rules are in `terrain/unmarked.py`;
@@ -514,7 +514,8 @@ def _imagery(directory: Path, block: dict, latitude_deg: float, candidates: list
     """Fetch NAIP over the box and test every candidate for a bare corridor,
     recorded as `candidate["imagery"]` - a check, never a sighting. Returns
     the sampler, or None when no tile could be fetched."""
-    from .imagery import NdviSampler, bare_corridor, load_naip
+    from ..sources.naip import load_naip
+    from .imagery import NdviSampler, bare_corridor
 
     answer = load_naip(directory, block["bbox_3857"], latitude_deg, refresh=refresh, get=get)
     summary = {key: answer[key] for key in ("status", "tiles", "missing", "pixel_m", "reason")}

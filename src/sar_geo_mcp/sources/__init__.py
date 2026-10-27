@@ -26,10 +26,22 @@ from .base import (
     SourceUnavailable,
     Transport,
 )
-from . import agency, caltopo_wms, dem, hifld, landfire, osm, osrm, tigerweb
+from . import (
+    agency,
+    caltopo_wms,
+    dem,
+    hifld,
+    landfire,
+    naip,
+    osm,
+    osrm,
+    static_imagery,
+    tigerweb,
+)
 
 #: Source modules, each defining one or more `DataSource` subclasses.
-MODULES: tuple[ModuleType, ...] = (dem, landfire, caltopo_wms, osm, agency, hifld, osrm, tigerweb)
+MODULES: tuple[ModuleType, ...] = (dem, landfire, caltopo_wms, naip, static_imagery, osm, agency, hifld,
+                                    osrm, tigerweb)
 
 
 def source_classes() -> dict[str, type[DataSource]]:

@@ -116,7 +116,7 @@ class CaltopoConfig:
     #: for another agency's corpus. None means the shipped file.
     norms_path: Path | None = None
     #: Keys for the static satellite chips a landing zone is cut from
-    #: (planning/chips.py); empty means that source is not asked. repr=False
+    #: (sources/static_imagery.py); empty means that source is not asked. repr=False
     #: for the reason `wms_token` has it: each lands in a request URL.
     mapbox_token: str = field(default="", repr=False)
     google_maps_key: str = field(default="", repr=False)

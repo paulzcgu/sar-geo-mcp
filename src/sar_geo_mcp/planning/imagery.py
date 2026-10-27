@@ -1,4 +1,4 @@
-"""NAIP aerial imagery over a staged box, and the bare-corridor test.
+"""The bare-corridor test, over NAIP imagery staged by `sources.naip`.
 
 WHY IMAGERY
 -----------
@@ -13,17 +13,8 @@ the line against 0.3 beside it); of 200 random 60 m lines in the same
 window, 19 did. So a line that passes is roughly ten times likelier to be
 a cleared corridor than chance - not proof, but independent agreement.
 
-THE SERVICE
------------
-USGS National Map NAIP, two public ImageServers with the same four bands
-(red, green, blue, near-infrared), no credential:
-  - `USGSNAIPImagery` - tried first. Four 1,000 px tiles in parallel took
-    11.4-25.2 s (2026-10-21).
-  - `USGSNAIPPlus` - the fallback. The same tile took 26-55 s, and one
-    3,800 px request timed out at 90 s with a 504.
-A request costs about the same whatever its size (250 px and 1,000 px both
-took about 27 s on NAIPPlus), so the box is fetched in few, large tiles,
-in parallel, each cached in the staged directory on its own.
+The imagery itself - which service, its tiles and their cache - is
+`sources.naip`.
 
 FAILURE IS NOT LOOKED FOR
 -------------------------
@@ -34,42 +25,10 @@ agency sources follow.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import os
-import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-
-from ..net_errors import safe_reason
-
-NAIP_URLS = (
-    "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer",
-    "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer",
-)
-NAIP_URLS_ENV = "ZA_NAIP_URLS"
-
-USER_AGENT = "sar-geo-mcp (search and rescue planning)"
-
-IMAGERY_DIRNAME = "imagery"
-IMAGERY_VERSION = 1
-
-#: Ground metres per imagery pixel. Dirt roads here are 4-6 m wide; 1 m
-#: puts several pixels across one, where the DEM's 2 m puts two.
-IMAGERY_PIXEL_M = 1.0
-
-#: Pixels per tile side, and the most tiles a box is fetched in. Past
-#: MAX_TILES the pixel is coarsened instead - a 16 km staging at 1 m would
-#: be 256 requests.
-TILE_PX = 1000
-MAX_TILES = 36
-
-WORKERS = 4
-ATTEMPTS_PER_URL = 2
-TIMEOUT_S = 120.0
 
 #: The bare-corridor test: NDVI along a line must sit at least this far
 #: below the median of the ground FLANK_M to either side.
@@ -92,106 +51,6 @@ IMAGERY_ASSUMPTIONS = {
                "fence clearing or a dry creek bed can pass it. Agreement, not proof"),
     "none_means": "not looked at - no imagery fetched there",
 }
-
-
-def naip_urls() -> tuple[str, ...]:
-    configured = os.environ.get(NAIP_URLS_ENV, "").strip()
-    if configured:
-        return tuple(url.strip().rstrip("/") for url in configured.split(",") if url.strip())
-    return NAIP_URLS
-
-
-def _http_get(url: str, params: dict, timeout: float):
-    import httpx
-
-    return httpx.get(url, params=params, timeout=timeout, follow_redirects=True,
-                     headers={"User-Agent": USER_AGENT})
-
-
-def tile_grid(bbox_3857, latitude_deg: float) -> tuple[list[tuple], float]:
-    """[(row, col, (w, s, e, n)), ...] covering the box, and the ground metres
-    per pixel used - IMAGERY_PIXEL_M, coarsened only to stay under MAX_TILES."""
-    west, south, east, north = bbox_3857
-    scale = math.cos(math.radians(latitude_deg))            # ground m per unit
-    side_m = max(east - west, north - south) * scale
-    pixel_m = max(IMAGERY_PIXEL_M, side_m / (math.isqrt(MAX_TILES) * TILE_PX))
-    tile_units = TILE_PX * pixel_m / scale
-    tiles = []
-    for row in range(max(1, math.ceil((north - south) / tile_units))):
-        for col in range(max(1, math.ceil((east - west) / tile_units))):
-            w = west + col * tile_units
-            n = north - row * tile_units
-            tiles.append((row, col, (w, n - tile_units, w + tile_units, n)))
-    return tiles, pixel_m
-
-
-def _fetch_tile(bounds, *, get) -> bytes:
-    """One tile as GeoTIFF bytes, trying each service in turn."""
-    w, s, e, n = bounds
-    params = {"bbox": f"{w},{s},{e},{n}", "bboxSR": 3857, "imageSR": 3857,
-              "size": f"{TILE_PX},{TILE_PX}", "format": "tiff", "pixelType": "U8",
-              "interpolation": "RSP_BilinearInterpolation", "f": "image"}
-    last: Exception | None = None
-    for url in naip_urls():
-        for attempt in range(ATTEMPTS_PER_URL):
-            try:
-                response = get(f"{url}/exportImage", params, TIMEOUT_S)
-                if response.status_code == 200 and response.content[:2] in (b"II", b"MM"):
-                    return response.content
-                last = RuntimeError(f"NAIP answered {response.status_code}")
-            except Exception as error:  # noqa: BLE001 - try the next one
-                last = error
-            time.sleep(1.0 + attempt)
-    raise last or RuntimeError("no NAIP service configured")
-
-
-def load_naip(directory: Path, bbox_3857, latitude_deg: float, *, refresh: bool = False,
-              get=None) -> dict:
-    """Fetch (or reuse) the tiles over the box. Returns `status` ("ok",
-    "partial" or "failed"), `tiles`, `missing`, `pixel_m`, `reason` and
-    `paths` - the cached tile files, in tile order."""
-    get = get or _http_get
-    folder = Path(directory) / IMAGERY_DIRNAME
-    folder.mkdir(parents=True, exist_ok=True)
-    tiles, pixel_m = tile_grid(bbox_3857, latitude_deg)
-    stamp = {"version": IMAGERY_VERSION, "pixel_m": round(pixel_m, 4),
-             "urls": list(naip_urls())}
-    meta = folder / "naip.json"
-    if refresh or not meta.exists() or json.loads(meta.read_text(encoding="utf-8")) != stamp:
-        for old in folder.glob("naip_r*_c*.tif"):
-            old.unlink()
-        meta.write_text(json.dumps(stamp), encoding="utf-8")
-
-    def path_of(row, col):
-        return folder / f"naip_r{row}_c{col}.tif"
-
-    needed = [(row, col, bounds) for row, col, bounds in tiles if not path_of(row, col).exists()]
-    reasons: list[str] = []
-
-    def fetch(job):
-        row, col, bounds = job
-        try:
-            data = _fetch_tile(bounds, get=get)
-        except Exception as error:  # noqa: BLE001 - a missing tile, reported
-            return job, None, safe_reason(error) if not isinstance(error, RuntimeError) else str(error)
-        return job, data, None
-
-    from ..cache import atomic_write_bytes
-
-    with ThreadPoolExecutor(WORKERS) as pool:
-        for (row, col, _), data, reason in pool.map(fetch, needed):
-            if data is None:
-                reasons.append(reason)
-            else:
-                atomic_write_bytes(path_of(row, col), data)
-
-    present = [(row, col) for row, col, _ in tiles if path_of(row, col).exists()]
-    missing = [[row, col] for row, col, _ in tiles if not path_of(row, col).exists()]
-    status = "ok" if not missing else ("failed" if not present else "partial")
-    return {"status": status, "tiles": len(tiles), "missing": missing,
-            "pixel_m": round(pixel_m, 3),
-            "reason": "; ".join(sorted(set(reasons))) or None,
-            "paths": [str(path_of(row, col)) for row, col in present]}
 
 
 class NdviSampler:

@@ -164,11 +164,60 @@ def _tigerweb_states(tmp_path: Path):
     return result
 
 
+def _four_band_tiff() -> bytes:
+    import numpy as np
+    from rasterio.io import MemoryFile
+    from rasterio.transform import from_bounds
+
+    west, south, east, north = AREA.bbox_3857
+    profile = {"driver": "GTiff", "dtype": "uint8", "count": 4, "height": 8, "width": 8,
+               "crs": "EPSG:3857", "transform": from_bounds(west, south, east, north, 8, 8)}
+    with MemoryFile() as memory:
+        with memory.open(**profile) as target:
+            target.write(np.full((4, 8, 8), 100, dtype=np.uint8))
+        return memory.read()
+
+
+def _usgs_naip(tmp_path: Path):
+    from sar_geo_mcp.sources.naip import UsgsNaipSource
+
+    result = UsgsNaipSource(tmp_path, transport=FakeTransport(body=_four_band_tiff())).fetch(AREA)
+    assert result.warnings == []
+    return result
+
+
+def _static(cls, key_env, tmp_path):
+    from test_wms_fetch import png_bytes
+
+    transport = FakeTransport(body=png_bytes(64, 64, (0, 128, 0)))
+    source = cls(tmp_path, env={key_env: FAKE_KEY}, transport=transport)
+    result = source.fetch(AREA, 64)
+    again = source.fetch(AREA, 64)
+    assert again.path == result.path and len(transport.urls) == 1, "served from cache"
+    assert FAKE_KEY in transport.urls[0] and FAKE_KEY not in result.path.name
+    return result
+
+
+def _mapbox_satellite(tmp_path: Path):
+    from sar_geo_mcp.sources.static_imagery import MapboxSatelliteSource
+
+    return _static(MapboxSatelliteSource, "ZA_MAPBOX_TOKEN", tmp_path)
+
+
+def _google_satellite(tmp_path: Path):
+    from sar_geo_mcp.sources.static_imagery import GoogleSatelliteSource
+
+    return _static(GoogleSatelliteSource, "ZA_GOOGLE_MAPS_KEY", tmp_path)
+
+
 #: name -> run the source once against a fake network; returns its result.
 FAKE_CALLS: dict[str, Callable[[Path], object]] = {
     "usgs_3dep": _usgs_3dep,
     "landfire_evt": _landfire_evt,
     "caltopo_wms": _caltopo_wms,
+    "usgs_naip": _usgs_naip,
+    "mapbox_satellite": _mapbox_satellite,
+    "google_satellite": _google_satellite,
     "osm": _osm,
     "agency_ways": _agency_ways,
     "hifld_hospitals": _hifld_hospitals,

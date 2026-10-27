@@ -1,5 +1,6 @@
-"""Static satellite images for a landing-zone chip, from providers that are
-not a WMS: Mapbox's Static Images API and Google's Static Maps API.
+"""Static satellite images, from providers that are not a WMS: Mapbox's
+Static Images API and Google's Static Maps API. A landing-zone chip is cut
+from them.
 
 Each is asked for a centre, a zoom and a pixel size. The answer covers a box
 this module computes from those three - Web Mercator is a fixed grid, so the
@@ -29,6 +30,8 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
 
+from .base import Area, RasterResult, RasterSource, SourceInfo, SourceUnavailable
+
 EARTH_CIRCUMFERENCE_M = 2 * math.pi * 6378137.0
 MAPBOX_TILE_PX = 512
 GOOGLE_TILE_PX = 256
@@ -39,8 +42,8 @@ MAPBOX_ATTRIBUTION = "© Mapbox © OpenStreetMap © Maxar"
 GOOGLE_ATTRIBUTION = "Imagery © Google"
 
 __all__ = ["EARTH_CIRCUMFERENCE_M", "GOOGLE_ATTRIBUTION", "GOOGLE_TILE_PX", "GetStatic",
-           "MAPBOX_ATTRIBUTION", "MAPBOX_TILE_PX", "get_static", "google_request",
-           "mapbox_request"]
+           "GoogleSatelliteSource", "MAPBOX_ATTRIBUTION", "MAPBOX_TILE_PX",
+           "MapboxSatelliteSource", "get_static", "google_request", "mapbox_request"]
 
 
 def _units_per_px(zoom: float, tile_px: int) -> float:
@@ -126,3 +129,93 @@ def get_static(url: str) -> bytes:
 
 
 GetStatic = Callable[[str], bytes]
+
+
+#: The largest square either provider serves at scale 1.
+MAX_STATIC_PX = 640
+
+
+class _StaticSatelliteSource(RasterSource):
+    """A keyed static image of an area's centre, sized to the area's width.
+    The image is a PNG or JPEG covering `RasterResult.bbox_3857` - the box
+    the provider really drew, which for Google is the nearest whole zoom.
+    Cached by a hash of the request WITHOUT the key, so a key never reaches
+    a file name."""
+
+    _request: Callable
+
+    def _cache_name(self, url: str) -> str:
+        import hashlib
+
+        keyless = str(_keyless_request(url).url) + "?" + "&".join(
+            part for part in urlsplit(url).query.split("&")
+            if not part.startswith(("access_token=", "key=")))
+        return f"{self.info.name}_{hashlib.sha256(keyless.encode()).hexdigest()[:32]}"
+
+    def fetch(self, area: Area, width_px: int = MAX_STATIC_PX,
+              height_px: int | None = None, **options) -> RasterResult:
+        from ..cache import atomic_write_bytes, note_hit, note_write
+        from ..geo import ground_meters_per_mercator_unit
+
+        if options:
+            raise ValueError(f"{self.info.name} takes no options; got {sorted(options)}")
+        key = self.key()
+        if key is None:
+            raise ValueError(f"{self.info.name} needs {self.info.key_env}")
+        west, south, east, north = area.bbox_3857
+        x, y = (west + east) / 2, (south + north) / 2
+        size_m = max(east - west, north - south) * ground_meters_per_mercator_unit(area.latitude)
+        px = max(1, min(int(width_px), MAX_STATIC_PX))
+        url, bbox = self._build(x, y, latitude=area.latitude, size_m=size_m, px=px, key=key)
+        cache_dir = self.require_cache()
+        name = self._cache_name(url)
+        existing = [path for path in cache_dir.glob(name + ".*")]
+        if existing:
+            note_hit(cache_dir, existing[0])
+            path = existing[0]
+        else:
+            try:
+                data = (self.transport.get_bytes(url) if self.transport else get_static(url))
+            except Exception as error:  # noqa: BLE001 - reported by type and status only
+                raise SourceUnavailable.from_error(self.info.name, error) from error
+            path = cache_dir / (name + (".png" if data.startswith(b"\x89PNG") else ".jpg"))
+            atomic_write_bytes(path, data)
+            note_write(cache_dir, path, layer=self.info.name)
+        return RasterResult(path=path, bbox_3857=bbox, width_px=px, height_px=px,
+                            attribution=self.info.attribution)
+
+
+class MapboxSatelliteSource(_StaticSatelliteSource):
+    info = SourceInfo(
+        name="mapbox_satellite",
+        title="Mapbox Satellite",
+        kind="raster",
+        provider="Mapbox (Maxar imagery)",
+        default_url="https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/",
+        attribution=MAPBOX_ATTRIBUTION,
+        coverage="global",
+        key_env="ZA_MAPBOX_TOKEN",
+        notes=("The Mapbox logo stays on the image; the text credit is the attribution.",),
+    )
+
+    def _build(self, x, y, *, latitude, size_m, px, key):
+        return mapbox_request(x, y, latitude=latitude, size_m=size_m, px=px, token=key)
+
+
+class GoogleSatelliteSource(_StaticSatelliteSource):
+    info = SourceInfo(
+        name="google_satellite",
+        title="Google Satellite",
+        kind="raster",
+        provider="Google Maps Static API",
+        default_url="https://maps.googleapis.com/maps/api/staticmap",
+        attribution=GOOGLE_ATTRIBUTION,
+        coverage="global",
+        key_env="ZA_GOOGLE_MAPS_KEY",
+        pullable=False,
+        notes=("Google's terms restrict how static images may be used and shown: "
+               "used for landing-zone chips only, never pulled on its own.",),
+    )
+
+    def _build(self, x, y, *, latitude, size_m, px, key):
+        return google_request(x, y, latitude=latitude, size_m=size_m, px=px, key=key)
