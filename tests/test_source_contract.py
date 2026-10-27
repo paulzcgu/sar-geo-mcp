@@ -115,12 +115,28 @@ def _osm(tmp_path: Path):
     return everything
 
 
+def _agency_ways(tmp_path: Path):
+    from sar_geo_mcp.sources.agency import AgencyWaysSource
+
+    latitude, longitude = AREA.center_wgs84
+    answer = {"features": [{"attributes": {"id": "1", "name": "Made-up Road",
+                                           "oper_maint_level": "1 - BASIC CUSTODIAL CARE (CLOSED)"},
+                            "geometry": {"paths": [[[longitude, latitude],
+                                                    [longitude + 0.001, latitude]]]}}]}
+    source = AgencyWaysSource(tmp_path, transport=FakeTransport(json_body=answer))
+    result = source.query(AREA, filters={"source": "usfs_roads"})
+    assert result.total == 2   # one from each of the two Forest Service road layers
+    assert result.features[0]["properties"]["source"] == "usfs_roads"
+    return result
+
+
 #: name -> run the source once against a fake network; returns its result.
 FAKE_CALLS: dict[str, Callable[[Path], object]] = {
     "usgs_3dep": _usgs_3dep,
     "landfire_evt": _landfire_evt,
     "caltopo_wms": _caltopo_wms,
     "osm": _osm,
+    "agency_ways": _agency_ways,
 }
 
 CLASSES = sources.source_classes()

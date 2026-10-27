@@ -16,7 +16,7 @@ from shapely.geometry import LineString
 
 from test_grid import make_wgs84_square, write_fetch_dir
 
-from sar_geo_mcp.planning.agency_ways import (
+from sar_geo_mcp.sources.agency import (
     CACHE_FILENAME,
     SOURCES,
     esri_paths_to_geojson,

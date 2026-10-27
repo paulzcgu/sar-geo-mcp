@@ -1,6 +1,6 @@
 """Unmarked roads and trails on staged ground, from every source at once.
 
-The sources are the land agencies' records (`agency_ways.py`), checked
+The sources are the land agencies' records (`sources/agency.py`), checked
 against NAIP imagery (`imagery.py`), and - experimental, only when named -
 the elevation (`terrain/lineaments.py`). "Unmarked" is measured against the
 staged OpenStreetMap ways - what almost every map app, CalTopo's base layers
@@ -47,7 +47,7 @@ from ..terrain.unmarked import (
     unmapped_parts,
 )
 from ..terrain.bridges import BRIDGE_ASSUMPTIONS
-from .agency_ways import AGENCY_SOURCES, SOURCES, load_agency_ways
+from ..sources.agency import AGENCY_SOURCES, SOURCES, load_agency_ways
 from .imagery import IMAGERY_ASSUMPTIONS
 
 #: "imagery" is not a line source: it checks every candidate the others

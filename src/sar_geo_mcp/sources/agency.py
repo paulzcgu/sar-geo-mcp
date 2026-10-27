@@ -1,4 +1,4 @@
-"""Roads and trails from the land agencies' own records, for one staged box.
+"""Roads and trails from the land agencies' own records: a source.
 
 WHY THESE AND NOT ONLY OPENSTREETMAP
 ------------------------------------
@@ -59,6 +59,7 @@ from pathlib import Path
 from typing import Any
 
 from ..net_errors import safe_reason
+from .base import Area, FeatureResult, FeatureSource, SourceInfo, SourceUnavailable
 
 USER_AGENT = "sar-geo-mcp (search and rescue planning)"
 
@@ -359,3 +360,79 @@ def load_agency_ways(directory: Path, bbox_wgs84, sources: list[str], *,
         atomic_write_text(path, json.dumps({"version": AGENCY_QUERY_VERSION,
                                             "bbox_wgs84": box, "sources": cached}))
     return answers
+
+
+class _JsonResponse:
+    """What `query_layer` reads off a response, from a transport's JSON."""
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class AgencyWaysSource(FeatureSource):
+    """The land agencies' road and trail inventories, as a source.
+
+    `query` returns their records over an area as GeoJSON lines, each with
+    its agency's own detail. `filters={"source": [...]}` picks inventories
+    from `AGENCY_SOURCES`; all are read when none is named. A source that
+    fails is a warning; every source named failing is `SourceUnavailable`,
+    never an empty answer."""
+
+    info = SourceInfo(
+        name="agency_ways",
+        title="Land agency road and trail inventories",
+        kind="features",
+        provider="USDA Forest Service (EDW), Bureau of Land Management (GTLF), "
+                 "USGS National Map",
+        default_url=_USFS,
+        attribution="USDA Forest Service; Bureau of Land Management; USGS National Map",
+        coverage="US federal land: each agency's layers stop at its own land",
+        notes=(
+            "Not current: a line is where a road was surveyed, possibly decades ago.",
+            "The National Map republishes other agencies' lines: each record's "
+            "`lineage` names its originator, so a copy is not a second sighting.",
+            "Inventories: " + ", ".join(AGENCY_SOURCES),
+        ),
+    )
+
+    def query(self, area: Area, *, filters=None, limit: int | None = None) -> FeatureResult:
+        import hashlib
+
+        filters = dict(filters or {})
+        chosen = filters.pop("source", None)
+        if filters:
+            raise ValueError(f"agency_ways filters by source only; got {sorted(filters)}")
+        sources = ([chosen] if isinstance(chosen, str) else list(chosen)) if chosen \
+            else list(AGENCY_SOURCES)
+        from pyproj import Transformer
+
+        to_wgs84 = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+        west, south = to_wgs84.transform(area.bbox_3857[0], area.bbox_3857[1])
+        east, north = to_wgs84.transform(area.bbox_3857[2], area.bbox_3857[3])
+        box = (west, south, east, north)
+        key = hashlib.sha256(",".join(f"{v:.7f}" for v in box).encode()).hexdigest()[:32]
+        directory = self.require_cache() / key
+        directory.mkdir(parents=True, exist_ok=True)
+        get = None
+        if self.transport is not None:
+            transport = self.transport
+            get = lambda url, params=None: _JsonResponse(transport.get_json(url, params))  # noqa: E731
+        answers = load_agency_ways(directory, box, sources, get=get)
+        features, warnings = [], []
+        for source, answer in answers.items():
+            if answer.get("status") != "ok":
+                warnings.append(f"{source} failed: {answer.get('reason')}")
+                continue
+            for record in answer.get("features") or []:
+                properties = {k: v for k, v in record.items() if k != "geometry"}
+                features.append({"type": "Feature", "geometry": record["geometry"],
+                                 "properties": properties})
+        if len(warnings) == len(answers):
+            raise SourceUnavailable(self.info.name, "; ".join(warnings))
+        cap = len(features) if limit is None else limit
+        return FeatureResult(features=features[:cap], total=len(features),
+                             attribution=self.info.attribution,
+                             truncated=len(features) > cap, warnings=warnings)
