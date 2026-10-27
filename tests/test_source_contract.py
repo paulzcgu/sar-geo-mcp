@@ -76,10 +76,27 @@ def _landfire_evt(tmp_path: Path):
     return source.fetch(AREA)
 
 
+def _caltopo_wms(tmp_path: Path):
+    from test_wms_fetch import png_bytes
+
+    from sar_geo_mcp.sources.caltopo_wms import CaltopoWmsSource
+    from sar_geo_mcp.tiles import TILE_PX
+
+    transport = FakeTransport(body=png_bytes(TILE_PX, TILE_PX, (255, 0, 0)))
+    source = CaltopoWmsSource(tmp_path, env={"ZA_WMS_TOKEN": FAKE_KEY},
+                              transport=transport)
+    result = source.fetch(AREA, 64, 64, layer="sf")
+    assert all(FAKE_KEY in url for url in transport.urls)
+    assert FAKE_KEY not in str(result) and FAKE_KEY not in source.endpoint()
+    assert not any(FAKE_KEY in path.name for path in tmp_path.rglob("*"))
+    return result
+
+
 #: name -> run the source once against a fake network; returns its result.
 FAKE_CALLS: dict[str, Callable[[Path], object]] = {
     "usgs_3dep": _usgs_3dep,
     "landfire_evt": _landfire_evt,
+    "caltopo_wms": _caltopo_wms,
 }
 
 CLASSES = sources.source_classes()
