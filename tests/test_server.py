@@ -127,6 +127,7 @@ async def test_every_tool_is_registered_with_a_description(server):
         "plan_medevac", "plan_initial_response", "plan_urban_search",
         "debrief_assignment",
         "key_status", "check_for_update", "save_export",
+        "list_data_sources", "fetch_raster", "query_features",
     }
     for tool in tools:
         assert tool.description and len(tool.description) > 40, (

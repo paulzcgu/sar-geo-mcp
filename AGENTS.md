@@ -239,7 +239,8 @@ component   parse_coordinate, get_candidate, cache_status     ┘
 ─────────────────────────────────────────────────────────────────
 domain      terrain/, coverage/, planning/ algorithms,          ┐ internal
             staging, prefetch, handles, coords                   │ libraries
-infra       net, net_errors, config, cache/, tiles, geo,         │
+infra       sources/ (every external data source), net,          │
+            net_errors, config, cache/, tiles, geo,              │
             CalTopo session and WMS transport                    ┘
 ```
 
@@ -262,8 +263,51 @@ debrief. Lives in `src/sar_geo_mcp/scenarios/`.
 **Domain** - the SAR logic itself: what a ridge is, how an LZ is graded,
 how fast a walker moves through brush. Independently tested.
 
-**Infra** - plumbing with no SAR knowledge: HTTP and retries, the disk
-cache, tile arithmetic, CalTopo login and WMS transport.
+**Infra** - plumbing with no SAR knowledge: the data sources (`sources/`),
+HTTP and retries, the disk cache, tile arithmetic, CalTopo login and WMS
+transport.
+
+## Data sources (`sources/`)
+
+Every external service this package reads is a class in `sources/`, one
+module each, built on `sources.base`: 3DEP elevation, LANDFIRE vegetation,
+CalTopo map layers, USGS NAIP, Mapbox and Google satellite, OpenStreetMap,
+the land agency inventories, HIFLD hospitals, OSRM and TIGERweb. A source
+fetches, caches and returns the service's own data in the service's own
+terms; what it means for a search (a walkable way, a trauma level, a bare
+corridor) is domain logic that reads it.
+
+- **Three kinds**, by the shape of what comes back: `RasterSource.fetch(area,
+  width_px, height_px)` (a georeferenced image), `FeatureSource.query(area,
+  filters, limit)` (GeoJSON features), `ServiceSource.call(**params)` (JSON).
+  Each class carries a `SourceInfo`: name, provider, endpoint and its
+  environment override, key variable, attribution, coverage, and whether
+  Claude may pull it directly (`pullable`; Google's terms keep it to
+  landing-zone chips).
+- **Adding a source** is one module: subclass the kind, fill in `info`, write
+  the one method, add the module to `sources.MODULES`, and give
+  `tests/test_source_contract.py` a `FAKE_CALLS` entry that runs it against a
+  fake transport. The contract test then checks it like every other source:
+  its info is complete, its endpoint overrides, its key never appears in what
+  it says or in a failure (`SourceUnavailable` carries type and status only),
+  and its answer has its kind's shape. A failure is `SourceUnavailable`, never
+  an empty answer.
+- **Its own cache folder**: `<cache>/<source name>/` (`cache.layout`), file
+  names unchanged inside it, one index at the root. A source whose files
+  predate 0.43.0 lists their old paths (`LEGACY_CACHE`); its first fetch in a
+  process moves them in and rewrites their index keys - never a download.
+  `tests/test_source_pins.py` pins every cache name and the Overpass query
+  text, so a change to either is deliberate.
+- **Only infra sends a request.** `tests/test_network_access.py` fails when a
+  module outside infra calls httpx to send one; catching httpx's errors is
+  fine. And no test reaches the network: `tests/conftest.py` fails any test
+  not marked `live` that opens a connection, even one the code swallowed.
+- **Claude pulls a source directly** through three components:
+  `list_data_sources`, `fetch_raster` and `query_features`
+  (`components/sources.py`). They take a staged handle or a centre and
+  radius (at most 4,500 m), save the data as a file under the source's
+  folder, return a summary rather than pixels, and say every time that raw
+  data carries none of the planning tools' checks.
 
 ## Rules
 
@@ -371,6 +415,7 @@ infra never import it, and nothing imports `server`, `context` included
 | component | `components/candidates.py` | `get_candidate`, `caltopo_export` |
 | component | `components/files.py` | `save_export` |
 | component | `components/setup.py` | `key_status`, `check_for_update` |
+| component | `components/sources.py` | `list_data_sources`, `fetch_raster`, `query_features` |
 | feature | `features/relief.py` | `shaded_relief`, `slope_shading` |
 | feature | `features/unmarked_paths.py` | `unmarked_paths` |
 | feature | `features/boundary.py` | `describe_boundary` |

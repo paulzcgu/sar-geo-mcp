@@ -1255,7 +1255,39 @@ name = "sar-geo-mcp"
 # says lot lines are read 200 m round the circle, then twice as far again
 # while a kept block runs into the edge, up to 1,000 m past it. Nothing
 # else changes.
-version = "0.42.1"
+# 0.43.0: every external data source is a class of its own, in its own
+# cache folder, and Claude can pull one directly.
+# WHAT WAS WRONG: the code that fetched each service was spread through
+# the planning code - Overpass in terrain/linear.py beside the way
+# classes, hospitals and road times in planning/medical.py beside trauma
+# levels - with five copies of the same HTTP plumbing, so a new tool or a
+# new source had nowhere to start from, and Claude could reach a source
+# only through a tool built on it. Every source cached at the cache root.
+# WHAT CHANGED: sources/ (infra) holds one class per source on a shared
+# base - raster, features or service - with its endpoint override, key
+# handling, attribution, coverage and safe failure: usgs_3dep, landfire_evt,
+# caltopo_wms, usgs_naip, mapbox_satellite, google_satellite, osm,
+# agency_ways, hifld_hospitals, osrm and tigerweb_states. Three new
+# components: list_data_sources, fetch_raster (an image of an area saved as
+# a file, with a summary, never pixels) and query_features (GeoJSON, e.g.
+# OpenStreetMap ways filtered by tag over cached tiles, at no Overpass
+# cost). Google is not pullable: its terms keep it to landing-zone chips.
+# Every answer says it is raw data, without the planning tools' checks.
+# Each source caches in <cache>/<source name>/. The first fetch after
+# upgrading moves that source's files from the cache root into its folder
+# - a rename, never a download (a 2.9 GB cache took 0.04 s) - and rewrites
+# their index keys; staged ground and map reads stay where they were.
+# Requests, retries, timeouts and the Overpass query are unchanged, byte
+# for byte. A Python consumer importing these directly finds them moved:
+# terrain.dem -> sources.dem; terrain.evt's fetching and code table ->
+# sources.landfire (codes_at_cells and composition stay); terrain.linear's
+# Overpass fetching, query and versions -> sources.osm (classification,
+# routes_for, parking_for, gates_for stay); planning.agency_ways ->
+# sources.agency; planning.chips -> sources.static_imagery; NAIP fetching
+# -> sources.naip; query_hospitals -> sources.hifld, osrm_table ->
+# sources.osrm, point_state -> sources.tigerweb, osm_helipads_near ->
+# sources.osm.helipads_near.
+version = "0.43.0"
 description = "CalTopo interaction hub and geo-computing accessories for SAR"
 license = "MIT"
 license-files = ["LICENSE"]
