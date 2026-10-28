@@ -143,7 +143,7 @@ release reaches them on their next Claude restart. Offline, it runs the
 copy already cached. The "Pin version" setting holds one version.
 Files a user asks to save go in `~/Documents/sar_geo/<chat folder>`
 (`SAR_GEO_EXPORTS_DIR`); downloaded terrain is cached in the system cache
-folder (`~/Library/Caches/sar_geo` on macOS, `%LOCALAPPDATA%\sar_geo` on
+folder (`~/Library/Caches/sar_geo` on macOS, `%LOCALAPPDATA%\sar_geo\cache` on
 Windows), not in Documents, which many people sync to the cloud.
 Rebuild and resend the `.mcpb` only when something in `extension/`
 changes.

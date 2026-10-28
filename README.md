@@ -2,6 +2,17 @@
 
 **Search and rescue planning tools for Claude, built on CalTopo maps.**
 
+SAR Geo is a ready-made set of tools, features and scenarios that a
+language model can call directly. Without it, a model asked to plan a
+search has to reinvent the work every time - writing its own coordinate
+parsing, slope arithmetic or route search from scratch, and getting a
+slightly different answer each time. With it, the model calls one tested
+tool and gets the same measured answer for the same question. That makes
+results stable, and makes them adjustable: change a tool's parameters,
+not the model's improvised code. It is also a plain Python package, so
+any Python program can import the same functions as a library, with no
+MCP server and no language model involved.
+
 SAR Geo gives Claude forty-seven tools for planning a search: read a
 CalTopo map, stage the terrain around a place last seen, and ask for hasty
 search lines, parking, helicopter landing zones, the way out, walking-time
@@ -17,24 +28,88 @@ the people running the search decide.
 
 ### Claude Desktop (no coding needed)
 
-1. Get `sar-geo.mcpb` from whoever shared SAR Geo with you.
+1. Download `sar-geo.mcpb` from the
+   [latest release](https://github.com/paulzcgu/sar-geo-mcp/releases/latest)
+   (direct link:
+   [sar-geo.mcpb](https://github.com/paulzcgu/sar-geo-mcp/releases/latest/download/sar-geo.mcpb)).
 2. Open it, and click **Install** in Claude Desktop (macOS or Windows).
    Claude warns that the extension is not verified by Anthropic; that is
    expected for anything not in Anthropic's directory.
 3. Fill in any keys you have (all optional; see *Keys* below) and save.
 
-It updates itself: each time Claude Desktop starts it, it runs the newest
-release. Ask Claude "check for a sar-geo update" to see your version, or set
-**Pin version** to stay on one, such as during an operation.
+The first start downloads the server from PyPI, which takes a minute or
+so; later starts reuse that copy, and offline it runs the copy it already
+has. It updates itself: each time Claude Desktop starts it, it runs the
+newest release, so you install the `.mcpb` once. Ask Claude "check for a
+sar-geo update" to see your version, or set **Pin version** to stay on
+one, such as during an operation.
 
-### From source, for any MCP client
+### Any other MCP client (Claude Code, and others)
+
+The package is on [PyPI](https://pypi.org/project/sar-geo-mcp/) and needs
+Python 3.12 or newer. The `mcp` extra adds the server; without it you get
+the library alone. With [uv](https://docs.astral.sh/uv/), nothing needs
+installing first:
+
+```bash
+claude mcp add sar-geo -- uvx --python 3.12 --from "sar-geo-mcp[mcp]" sar-geo-mcp
+```
+
+Or install it with pip and register the command it puts on your `PATH`:
 
 ```bash
 pip install "sar-geo-mcp[mcp]"
+```
+
+```bash
 claude mcp add sar-geo -- sar-geo-mcp
 ```
 
-Developers: see AGENTS.md.
+Other clients take the same command (`sar-geo-mcp`) as a stdio server.
+
+### From source
+
+```bash
+git clone https://github.com/paulzcgu/sar-geo-mcp.git
+```
+
+```bash
+cd sar-geo-mcp && pip install -e ".[mcp]"
+```
+
+[AGENTS.md](AGENTS.md) covers the architecture, tests and releases.
+
+## Use it from Python
+
+Every tool is also a plain Python function, and the modules behind them
+can be imported on their own. A script, a notebook or another program gets
+exactly what an MCP caller gets:
+
+```python
+from sar_geo_mcp.coords import parse_location
+
+parse_location("10S EG 61234 41234")          # (37.4158..., -122.3080...)
+
+# A dropped western minus is put back only against a reference point:
+parse_location("37.3, 122.32", near=(37.3045, -122.32))   # (37.3, -122.32)
+```
+
+A tool function takes a `ServerContext` first, then the tool's own
+arguments:
+
+```python
+from sar_geo_mcp.config import CaltopoConfig
+from sar_geo_mcp.context import ServerContext
+from sar_geo_mcp.components.coords import distance_bearing
+
+ctx = ServerContext.build(CaltopoConfig.from_env())
+distance_bearing(ctx, 37.3, -122.32, 37.3045, -122.32)
+# about 499 metres, bearing 0 (due north)
+```
+
+Install with `pip install sar-geo-mcp` (no `[mcp]` needed). Features live
+in `sar_geo_mcp.features`, scenarios in `sar_geo_mcp.scenarios`;
+[AGENTS.md](AGENTS.md) lists which module holds each tool.
 
 ## Keys
 
@@ -52,7 +127,8 @@ unlocks.
 
 From source, set them as `ZA_WMS_TOKEN`, `ZA_CALTOPO_ID` and
 `ZA_CALTOPO_KEY` (or a `cts.ini`), `ZA_MAPBOX_TOKEN` and
-`ZA_GOOGLE_MAPS_KEY`.
+`ZA_GOOGLE_MAPS_KEY`. The CalTopo account ID field in the extension is
+only for printing PDFs through CalTopo; no tool needs it today.
 
 ## Where files go
 
@@ -60,13 +136,18 @@ Ask Claude to save a file (an export, an imagery chip) and it goes in
 `Documents/sar_geo/<chat folder>`, one folder per chat, and opens in Finder
 or Explorer. Downloaded terrain is cached out of the way, in
 `~/Library/Caches/sar_geo` on a Mac and `%LOCALAPPDATA%\sar_geo\cache` on
-Windows, and is downloaded again if deleted.
+Windows (`~/.cache/sar_geo` elsewhere), and is downloaded again if
+deleted. It can grow to a few GB.
+
+Both folders can be changed: in the extension's settings (**Exports
+folder**, **Cache folder**), or from source with `SAR_GEO_EXPORTS_DIR` and
+`ZA_CACHE_DIR`.
 
 ## The tools
 
 Each tool carries its layer as an MCP tag - `component`, `feature` or
-`scenario` - so a client can list one layer; AGENTS.md says which tool is
-in which. The four scenarios, last in the table, call
+`scenario` - so a client can list one layer; [AGENTS.md](AGENTS.md) says
+which tool is in which. The four scenarios, last in the table, call
 several features at once and answer in compact sections, each with its
 own status and the exact feature call that returns the full answer.
 
@@ -129,15 +210,17 @@ rather than plausible. A wrong coordinate is worse than no coordinate.
 ## Documentation
 
 Each tool describes itself to Claude, so asking Claude how to use one is
-the quickest guide. AGENTS.md has the architecture and how to change,
-test and release the code.
+the quickest guide. [AGENTS.md](AGENTS.md) has the architecture and how
+to change, test and release the code.
 
 ## Data
 
 Elevation (USGS 3DEP), vegetation type (LANDFIRE), roads and trails
 (OpenStreetMap, Forest Service, BLM, USGS), hospitals (HIFLD), road routing
 (OSRM), state boundaries (Census) and NAIP imagery are public. CalTopo's
-map layers need the WMS token above.
+map layers need the WMS token above; Mapbox and Google satellite images
+need their own keys. Ask Claude to "list the sar-geo data sources" for
+each one's coverage and attribution. Coverage is the United States.
 
 ## Origin
 
