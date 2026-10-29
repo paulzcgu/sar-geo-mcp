@@ -42,5 +42,9 @@ def register(mcp, ctx) -> None:
         tracks could not be read either, and that is reported rather than
         computed around. An area assignment needs `terrain_metrics` called
         on the handle first: the sweep width comes from it.
+        `sweep_width_basis` says how that width was reached - the metrics'
+        own basis, "corridor_width_m" or "default_corridor" for a line -
+        and when it is "default_width", read off no vegetation at all, a
+        warning says every number here rests on it.
         """
         return coverage_for(ctx, handle=handle, track_names=track_names)

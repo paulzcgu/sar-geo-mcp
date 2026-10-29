@@ -80,3 +80,16 @@ def test_traverse_metrics_sweep_time_scales_with_area():
     assert large["sweep_time_hours_per_pass"] == pytest.approx(
         2 * small["sweep_time_hours_per_pass"], rel=1e-6
     )
+
+
+def test_the_sweep_width_basis_says_when_the_width_is_the_default():
+    """A width off known lifeforms says whether density was measured; a
+    width with no counted lifeform - none known, or only excluded ones such
+    as water - is the flat default, and says so."""
+    from sar_geo_mcp.terrain.traverse import (BASIS_DEFAULT, BASIS_DENSITY_ASSUMED,
+                                              BASIS_MEASURED, sweep_width_basis)
+
+    assert sweep_width_basis({"Tree": 1.0}, density_measured=True) == BASIS_MEASURED
+    assert sweep_width_basis({"Tree": 1.0}, density_measured=False) == BASIS_DENSITY_ASSUMED
+    assert sweep_width_basis({}, density_measured=True) == BASIS_DEFAULT
+    assert sweep_width_basis({"Water": 1.0}, density_measured=False) == BASIS_DEFAULT

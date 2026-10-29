@@ -20,6 +20,7 @@ from shapely.ops import transform as shapely_transform
 from ..geo import ground_meters_per_mercator_unit
 from ..terrain.grid import read_subject
 from ..terrain.metrics import TerrainMetrics
+from ..terrain.traverse import BASIS_DEFAULT, default_width_warning
 from .corridor import (
     DEFAULT_CORRIDOR_HALF_WIDTH_M,
     GAP_CLOSE_MAX_LATERAL_FACTOR,
@@ -129,6 +130,12 @@ class CoverageMetrics(BaseModel):
     assignment_kind: Literal["area", "line"] = "area"
     teams: list[str]
     effective_sweep_width_m: float
+    # How that width was reached: the metrics' own `sweep_width_basis`
+    # (lifeform and density, lifeform with density assumed, or the flat
+    # default), "corridor_width_m" for a line's width given by the caller,
+    # "default_corridor" for a line with no metrics; None when the metrics
+    # it was read from were saved before 0.43.1 said.
+    sweep_width_basis: str | None = None
     covered_fraction: float = Field(ge=0.0, le=1.0)
     # Koopman coverage number C = effort / zone area - area math, so it is
     # meaningless for a line assignment (no area to divide by) and null
@@ -258,6 +265,15 @@ def compute_coverage(data_dir: Path, teams: list[str], features: list[dict],
                                   corridor_width_m)
 
 
+def _default_width_warnings(terrain: TerrainMetrics) -> list[str]:
+    """The warning coverage carries when the width it read off the metrics
+    is the flat default, no vegetation type being known: every number it
+    gives rests on that width."""
+    if terrain.traverse.sweep_width_basis != BASIS_DEFAULT:
+        return []
+    return [default_width_warning(terrain.traverse.effective_sweep_width_m)]
+
+
 def _compute_area_coverage(teams: list[str], zone, terrain: TerrainMetrics,
                            features: list[dict]) -> CoverageResult:
     factor = ground_meters_per_mercator_unit(terrain.data_quality.latitude_deg)
@@ -307,8 +323,8 @@ def _compute_area_coverage(teams: list[str], zone, terrain: TerrainMetrics,
 
     closed_gaps = [ClosedGap(id=r.id, area_m2=r.area_m2, geometry=r.geometry)
                    for r in closed_regions]
-    warnings = (name_warnings + _mostly_outside_warnings(selected)
-                + _closed_area_warning(closed_gaps))
+    warnings = (name_warnings + _default_width_warnings(terrain)
+                + _mostly_outside_warnings(selected) + _closed_area_warning(closed_gaps))
 
     gaps = [GapSummary(id=g.id, area_m2=g.area_m2, geometry=g.geometry)
             for g in find_gaps(grid, closed_swath)]
@@ -321,6 +337,7 @@ def _compute_area_coverage(teams: list[str], zone, terrain: TerrainMetrics,
         assignment_kind="area",
         teams=list(teams),
         effective_sweep_width_m=sweep_width,
+        sweep_width_basis=terrain.traverse.sweep_width_basis,
         covered_fraction=min(1.0, covered),
         effort_coverage=effort,
         zone_area_m2=zone_area,
@@ -342,10 +359,14 @@ def _compute_line_coverage(data_dir: Path, teams: list[str], zone,
 
     if corridor_width_m is not None:
         full_width = corridor_width_m
+        basis = "corridor_width_m"
     elif terrain is not None:
         full_width = terrain.traverse.effective_sweep_width_m
+        basis = terrain.traverse.sweep_width_basis
+        warnings.extend(_default_width_warnings(terrain))
     else:
         full_width = DEFAULT_CORRIDOR_HALF_WIDTH_M * 2
+        basis = "default_corridor"
         warnings.append(
             f"no terrain_metrics.json for this line assignment; using the "
             f"default {full_width:.0f} m corridor "
@@ -428,6 +449,7 @@ def _compute_line_coverage(data_dir: Path, teams: list[str], zone,
         assignment_kind="line",
         teams=list(teams),
         effective_sweep_width_m=full_width,
+        sweep_width_basis=basis,
         covered_fraction=min(1.0, max(0.0, coverage.covered_fraction)),
         effort_coverage=None,
         zone_area_m2=None,

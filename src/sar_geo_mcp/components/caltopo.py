@@ -125,6 +125,8 @@ def register(mcp, ctx) -> None:
                              max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
                              ) -> dict[str, Any]:
         """One assignment in full: its geometry, description, and centre.
+        The geometry is the map's own GeoJSON, in WGS84 longitude and
+        latitude, as CalTopo holds it.
 
         `label` matches the way CalTopo shows it (QA103, QB102) and is
         case-insensitive. The `provenance` block says how old the geometry

@@ -141,6 +141,19 @@ class TerrainHandle:
         return Path(cache_dir) / STAGED_DIRNAME / self.key
 
 
+def _reuse_warnings(directory: Path) -> list[str]:
+    """The staged manifest's warnings as they stand now, for ground found
+    current and reused; none when the manifest cannot be read (the
+    fingerprint just read from it, so that is a race, not a state)."""
+    from .staging import manifest_warnings
+
+    try:
+        manifest = json.loads((Path(directory) / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return manifest_warnings(directory, manifest)
+
+
 def staged_fingerprint(directory: Path) -> str | None:
     try:
         manifest = json.loads((Path(directory) / "manifest.json")
@@ -252,8 +265,14 @@ def prepare_terrain(map_id: str, label: str, reader, *,
 
     if not force and existing is not None and existing == current:
         record_access(directory, public)
+        # What the ground lacks is still so on reuse - vegetation that could
+        # not be fetched is still missing - and prepare_area hands it back
+        # the same way: the manifest's warnings as they stand now, an outage
+        # a later osm.json retired left out (`staging.manifest_warnings`).
         return {"handle": handle.key, "staged": False, "reason": "already current",
-                "fingerprint": current, "provenance": state.provenance()}
+                "fingerprint": current,
+                "warnings": _reuse_warnings(directory),
+                "provenance": state.provenance()}
 
     result = stage_terrain(
         assignment, map_id, directory, cache_dir=reader.cache_dir,

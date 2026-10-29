@@ -2241,14 +2241,15 @@ DRAINAGE_FIELDS = ("id", "length_m", "full_length_m", "contributing_area_m2", "d
 #: takes. The table of rates and widths by lifeform behind them is
 #: `detail_call`'s - the same for every assignment, and a third of the block.
 TRAVERSE_FIELDS = ("baseline_rate_kmh", "vegetation_adjusted_rate_kmh",
-                   "effective_sweep_width_m", "sweep_time_hours_per_pass", "method")
+                   "effective_sweep_width_m", "sweep_width_basis",
+                   "sweep_time_hours_per_pass", "method")
 #: What a coverage gap keeps: its size and the terrain shapes it leaves
 #: unsearched, never its outline - `gap_point` puts a point inside it instead.
 GAP_FIELDS = ("id", "area_m2", "length_m", "dominant_vegetation", "mean_slope_deg",
               "unsearched_shapes")
 #: The coverage facts kept as coverage_for gives them.
 COVERAGE_FIELDS = ("assignment_label", "assignment_kind", "teams", "effective_sweep_width_m",
-                   "covered_fraction", "effort_coverage", "zone_area_m2", "line_length_m",
+                   "sweep_width_basis", "covered_fraction", "effort_coverage", "zone_area_m2", "line_length_m",
                    "time_entered", "time_exited", "time_searching_hours")
 
 
@@ -2420,6 +2421,9 @@ def metrics_facts(metrics: dict) -> dict[str, Any]:
             "dominant_lifeform": vegetation.get("dominant_lifeform"),
             "density_class": vegetation.get("density_class"),
             "effective_sweep_width_m": traverse.get("effective_sweep_width_m"),
+            # Beside the width, since the summary keeps no warning: "default_width"
+            # is a number read off no vegetation at all.
+            "sweep_width_basis": traverse.get("sweep_width_basis"),
             "sweep_time_hours_per_pass": traverse.get("sweep_time_hours_per_pass"),
             "drainages": (metrics.get("hydrology") or {}).get("drainage_count"),
             "cliff_bands": (metrics.get("landform") or {}).get("cliff_band_count"),
@@ -2435,8 +2439,9 @@ def coverage_section(ctx: ServerContext, handle: str, *, track_names: list[str],
     `metrics` is the metrics section's dict when this scenario ran it, None
     when it was left out. Coverage of an AREA assignment takes its sweep
     width from the metrics `terrain_metrics` saves, so when that section
-    failed this one does not run: DependencyFailed, naming the failure.
-    Left out, coverage_for reads the metrics an earlier call saved on this
+    failed this one runs on the width an earlier call saved on this ground,
+    with a warning saying so, and with none saved does not run:
+    DependencyFailed, naming the failure. Left out, coverage_for reads the metrics an earlier call saved on this
     ground (a re-staging discards them); with none saved an area's coverage
     does not run either: DependencyFailed, saying to add "metrics" to
     include - coverage_for's own refusal would name a local path and a
@@ -2447,7 +2452,13 @@ def coverage_section(ctx: ServerContext, handle: str, *, track_names: list[str],
     notes = []
     if metrics is not None and metrics["status"] == FAILED:
         kind = assignment_kind(ctx, handle)
-        if kind != "line":
+        saved = saved_metrics(ctx, handle)
+        if kind == "area" and saved:
+            # An earlier call's metrics are this ground's as staged now - a
+            # re-staging discards them - so the area runs on that width, as
+            # it would with metrics left out (PR #4 review B37).
+            notes.append(_saved_width_note(kind))
+        elif kind != "line":
             what = ("an area assignment" if kind == "area"
                     else "this assignment (whether it is an area or a line could not be read "
                          "from the staged ground)")
@@ -2455,7 +2466,8 @@ def coverage_section(ctx: ServerContext, handle: str, *, track_names: list[str],
                 f"coverage of {what} takes its sweep width from terrain_metrics, which the "
                 f"metrics section runs first, and it failed, so this section did not run - "
                 f"{metrics['error']}")
-        notes.append(_line_width_note(left_out=False, saved=saved_metrics(ctx, handle)))
+        else:
+            notes.append(_line_width_note(left_out=False, saved=saved))
     elif metrics is None and saved_metrics(ctx, handle) is False:
         # Only a definite "none saved": ground that cannot be found at all
         # is coverage_for's to refuse, in its own words, when it resolves it.
@@ -2485,6 +2497,14 @@ def coverage_section(ctx: ServerContext, handle: str, *, track_names: list[str],
                              "length_m": _total(closed, "length_m", measure)},
                 detail_call=detail_call("coverage_for", arguments)),
         staleness=payload.get("staleness"))
+
+
+def _saved_width_note(kind: str) -> str:
+    """The warning an area's coverage carries when this call's metrics
+    section failed and coverage ran on the sweep width an earlier call
+    saved on the same staged ground."""
+    return (f"the metrics section failed, so this {kind}'s sweep width is the one "
+            "terrain_metrics saved on this ground at an earlier call")
 
 
 def _line_width_note(*, left_out: bool, saved: bool | None) -> str:
@@ -2542,6 +2562,7 @@ def coverage_facts(coverage: dict) -> dict[str, Any]:
     return {"assignment_kind": coverage.get("assignment_kind"),
             "covered_fraction": coverage.get("covered_fraction"),
             "effort_coverage": coverage.get("effort_coverage"),
+            "sweep_width_basis": coverage.get("sweep_width_basis"),
             "tracks": len(coverage["tracks"]), "gaps": coverage["gap_count"],
             "gap_area_m2": coverage.get("gap_area_m2"),
             "gap_length_m": coverage.get("gap_length_m"),

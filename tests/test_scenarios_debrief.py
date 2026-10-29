@@ -36,6 +36,7 @@ from sar_geo_mcp.scenarios.debrief import (
     debrief_assignment,
 )
 from sar_geo_mcp.terrain.features import REGISTRY
+from sar_geo_mcp.terrain.traverse import default_width_warning
 
 MAP_ID, LABEL = "MAP1234", "AB"
 HANDLE = f"{MAP_ID}_{LABEL}"
@@ -91,7 +92,9 @@ def metrics_payload(staleness=None):
                        "dominant_lifeform": "Shrub", "top_types": [("Coastal Scrub", 0.6)],
                        "type_source": "LANDFIRE LF2024 EVT, 30 m"},
         "traverse": {"baseline_rate_kmh": 2.1, "vegetation_adjusted_rate_kmh": 1.4,
-                     "effective_sweep_width_m": 9.6, "sweep_time_hours_per_pass": 7.5,
+                     "effective_sweep_width_m": 9.6,
+                     "sweep_width_basis": "lifeform_moderate_density_assumed",
+                     "sweep_time_hours_per_pass": 7.5,
                      "method": "tobler1993 + lifeform/density sweep matrix",
                      "assumptions": {"sweep_width_m_by_lifeform": {"Shrub": 8.0}}},
         "hydrology": {"drainages": [DRAINAGE], "upstream_truncated": True,
@@ -131,7 +134,7 @@ def coverage_payload(arguments, *, kind="area", staleness=None):
     return {
         "schema_version": "1.1.0", "assignment_label": LABEL, "assignment_kind": kind,
         "teams": list(arguments["track_names"]), "effective_sweep_width_m": 9.6,
-        "covered_fraction": 0.62, "effort_coverage": 0.71 if area else None,
+        "sweep_width_basis": "lifeform_moderate_density_assumed", "covered_fraction": 0.62, "effort_coverage": 0.71 if area else None,
         "zone_area_m2": 520000.0 if area else None, "line_length_m": None if area else 1800.0,
         "tracks": [{"name": "101 AB", "length_in_zone_m": 38000.0, "length_total_m": 41000.0,
                     "in_zone_fraction": 0.93, "time_entered": "2026-10-21T16:02:11Z",
@@ -359,11 +362,12 @@ def test_every_section_answers_and_the_summary_reads_the_facts(ctx, monkeypatch)
     assert summary["metrics"] == {
         "area_m2": 520000.0, "relief_m": 220.0, "slope_mean_deg": 18.0, "slope_p90_deg": 31.0,
         "dominant_lifeform": "Shrub", "density_class": None, "effective_sweep_width_m": 9.6,
+        "sweep_width_basis": "lifeform_moderate_density_assumed",
         "sweep_time_hours_per_pass": 7.5, "drainages": 1, "cliff_bands": 1,
         "ingress_points": 2}
     assert summary["coverage"] == {
         "assignment_kind": "area", "covered_fraction": 0.62, "effort_coverage": 0.71,
-        "tracks": 1, "gaps": 2, "gap_area_m2": 44200.0, "gap_length_m": None,
+        "sweep_width_basis": "lifeform_moderate_density_assumed", "tracks": 1, "gaps": 2, "gap_area_m2": 44200.0, "gap_length_m": None,
         "largest_gap": {"id": "gap_0", "area_m2": 41000.0, "length_m": None,
                         "point": gap["point"]},
         "time_searching_hours": 5.63}
@@ -504,9 +508,6 @@ def test_failed_metrics_still_let_a_line_s_coverage_run(ctx, monkeypatch, saved,
     assert result["status"] == "partial"
 
 
-@pytest.mark.xfail(strict=True, reason="PR #4 review B37: If the metrics section fails, "
-                                       "coverage of an area is refused even when valid saved "
-                                       "metrics exist; leaving metrics out computes it")
 def test_failed_metrics_on_an_area_with_metrics_saved_use_the_saved_width(ctx, monkeypatch):
     """An earlier call saved this ground's metrics (a re-staging would have
     discarded them, so they describe it as staged now): a metrics section
@@ -779,9 +780,6 @@ def test_bad_arguments_are_refused_before_any_work(ctx, monkeypatch, arguments, 
 # --- Ground already staged ----------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="PR #4 review B42: debrief staging record's warnings is "
-                                       "always empty when the ground is reused (the common "
-                                       "case)")
 def test_a_reused_assignment_ground_still_reports_what_it_lacks(monkeypatch, tmp_path):
     """The real prepare_terrain, with the map read and the download faked as
     test_handles fakes them: the ground staged without vegetation and roads
@@ -872,9 +870,6 @@ async def test_debrief_assignment_is_registered_as_a_scenario_and_answers(monkey
 
 
 @pytest.mark.anyio
-@pytest.mark.xfail(strict=True, reason="PR #4 review B38: debrief docstring can be read as "
-                                       "saying get_assignment's outline is in Web Mercator; "
-                                       "it is WGS84")
 async def test_the_description_gives_get_assignment_s_outline_as_wgs84(tmp_path):
     """The description sends a debriefer to get_assignment for the outline:
     no clause naming it may put it in Web Mercator, which a client would
@@ -1063,6 +1058,25 @@ def test_the_sections_read_what_the_real_tools_return(ctx, monkeypatch, tmp_path
     assert again["sections"]["coverage"]["gap_count"] == coverage["gap_count"]
 
 
+def test_a_default_sweep_width_is_said_in_every_place_it_is_read(ctx, monkeypatch, tmp_path):
+    """The valley has no vegetation type, so its sweep width is the flat
+    default: the metrics and coverage both say so in a warning, and both
+    summary blocks name the basis beside the numbers, since the summary
+    keeps no warning beside a width that would read as measured."""
+    real_valley(monkeypatch, tmp_path, [team_track("101 AB", (50, 200), (350, 200))])
+    result = debrief(ctx, map_id="M1")
+    assert result["status"] == "ok"
+    warning = default_width_warning(15.0)
+    metrics = result["sections"]["metrics"]
+    assert metrics["traverse"]["sweep_width_basis"] == "default_width"
+    assert warning in metrics["warnings"]
+    coverage = result["sections"]["coverage"]
+    assert coverage["sweep_width_basis"] == "default_width"
+    assert warning in coverage["warnings"]
+    assert result["summary"]["metrics"]["sweep_width_basis"] == "default_width"
+    assert result["summary"]["coverage"]["sweep_width_basis"] == "default_width"
+
+
 def valley_line():
     """A line assignment across the valley, west to east along its middle."""
     from test_boundary import m
@@ -1235,7 +1249,10 @@ def test_a_plainly_named_track_carries_no_warning_about_its_name(ctx, monkeypatc
     result = debrief(ctx, map_id="M1", track_names=["3"])
     coverage = result["sections"]["coverage"]
     assert [track["name"] for track in coverage["tracks"]] == ["3 AB"]
-    assert coverage["warnings"] == [] and result["warnings"] == []
+    # The valley has no vegetation, so its one coverage warning is the
+    # default sweep width's, never one about the track's name.
+    assert coverage["warnings"] == [default_width_warning(15.0)]
+    assert result["warnings"] == []
 
 
 @pytest.mark.parametrize("title, team", [("UAS-WINGTRA FLIGHT 3", "3"),
