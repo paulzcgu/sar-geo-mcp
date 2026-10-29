@@ -103,6 +103,12 @@ def register(mcp, ctx) -> None:
         The metrics are also saved beside the staged ground, and
         `slope_stats`, `elevation_profile` and `coverage_for` read them
         from there, so call this first on a handle.
+
+        `traverse.sweep_width_basis` says how the sweep width was reached:
+        "lifeform_and_density", "lifeform_moderate_density_assumed" (no
+        vegetation panel measured density) or "default_width" - no
+        vegetation type known, so the width is a flat default read off no
+        vegetation at all, and a warning says so.
         """
         return terrain_metrics(ctx, handle=handle)
 

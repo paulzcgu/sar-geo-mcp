@@ -1287,7 +1287,32 @@ name = "sar-geo-mcp"
 # -> sources.naip; query_hospitals -> sources.hifld, osrm_table ->
 # sources.osrm, point_state -> sources.tigerweb, osm_helipads_near ->
 # sources.osm.helipads_near.
-version = "0.43.0"
+# 0.43.1: the debrief says what its numbers rest on.
+# WHAT WAS WRONG: four things in debrief_assignment (PR #4 review B37, B42
+# and B38, and one found since). When the metrics section failed on an
+# area assignment, coverage was refused even with metrics saved by an
+# earlier call on the same ground, which leaving metrics out would have
+# used. prepare_terrain, finding ground already current, returned no
+# warnings, so ground staged without vegetation or roads read as complete
+# on every reuse - the common case - in the tool and in the debrief's
+# staging record alike. The debrief's description could be read as saying
+# get_assignment's outline is in Web Mercator; it is WGS84. And with no
+# vegetation type known, the sweep width fell back to a flat 15 m that the
+# summary, the coverage numbers and the hours per pass all gave as if it
+# had been read off the ground.
+# WHAT CHANGED: a failed metrics section now lets an area's coverage run on
+# the width saved earlier, with a warning saying so; with none saved it is
+# refused as before. prepare_terrain's reuse returns the staged ground's
+# warnings as prepare_area's does, an outage a later OpenStreetMap fetch
+# retired left out. The description puts the outline in WGS84 and the gap
+# outlines in Web Mercator, each in a sentence of its own. terrain_metrics'
+# traverse and coverage_for's answer carry sweep_width_basis
+# (lifeform_and_density, lifeform_moderate_density_assumed or
+# default_width; for a line also corridor_width_m or default_corridor),
+# both debrief summary blocks copy it beside the numbers, and a default
+# width is a warning in the metrics and in the coverage. Metrics saved
+# before this release give the basis as null until they are made again.
+version = "0.43.1"
 description = "CalTopo interaction hub and geo-computing accessories for SAR"
 license = "MIT"
 license-files = ["LICENSE"]

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from .evt import composition
 from .slope import aspect_statistics, slope_statistics
-from .traverse import traverse_metrics
+from .traverse import BASIS_DEFAULT, default_width_warning, traverse_metrics
 from .vegetation import vegetation_statistics
 
 
@@ -48,6 +48,9 @@ class TraverseMetrics(BaseModel):
     baseline_rate_kmh: float
     vegetation_adjusted_rate_kmh: float
     effective_sweep_width_m: float
+    # How the width was reached (`traverse.sweep_width_basis`); None on
+    # metrics saved before 0.43.1 said.
+    sweep_width_basis: str | None = None
     sweep_time_hours_per_pass: float | None
     method: str
     assumptions: dict
@@ -184,8 +187,11 @@ def compute_terrain_metrics(data_dir: Path) -> TerrainMetrics:
             area_m2=grid.area_m2,
             density_class=vegetation.density_class or "moderate",
             lifeform_fractions=vegetation.lifeform_fractions or {},
+            density_measured=vegetation.density_class is not None,
         )
     )
+    if traverse.sweep_width_basis == BASIS_DEFAULT:
+        warnings.append(default_width_warning(traverse.effective_sweep_width_m))
 
     drainage_envelope = envelopes["drainage"]
     hydrology = HydrologyMetrics(

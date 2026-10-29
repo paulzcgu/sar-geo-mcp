@@ -41,6 +41,34 @@ ASSUMPTIONS = {
 }
 
 
+#: How a sweep width was reached, as `sweep_width_basis` names it: off the
+#: ground's lifeforms and its measured density; off its lifeforms, density
+#: assumed moderate (ground with no vegetation panel); or the flat default,
+#: no lifeform being known - a number read off no vegetation at all.
+BASIS_MEASURED = "lifeform_and_density"
+BASIS_DENSITY_ASSUMED = "lifeform_moderate_density_assumed"
+BASIS_DEFAULT = "default_width"
+
+
+def sweep_width_basis(lifeform_fractions: dict[str, float], *,
+                      density_measured: bool) -> str:
+    """Which of the three bases `effective_sweep_width_m` stands on for
+    these lifeforms: the default when none of them counts (all excluded,
+    or none known)."""
+    excluded = set(ASSUMPTIONS["excluded_lifeforms"])
+    if not any(fraction > 0 for lifeform, fraction in lifeform_fractions.items()
+               if lifeform not in excluded):
+        return BASIS_DEFAULT
+    return BASIS_MEASURED if density_measured else BASIS_DENSITY_ASSUMED
+
+
+def default_width_warning(width_m: float) -> str:
+    """What a reader must hear beside a sweep width that is the default."""
+    return (f"vegetation type unknown, so the sweep width is the flat {width_m:g} m default, "
+            "not one read off this ground's vegetation: the sweep time and any coverage "
+            "computed from it rest on that default")
+
+
 def effective_sweep_width_m(lifeform_fractions: dict[str, float],
                             density: str) -> float:
     widths = ASSUMPTIONS["sweep_width_m_by_lifeform"]
@@ -60,7 +88,12 @@ def effective_sweep_width_m(lifeform_fractions: dict[str, float],
 
 
 def traverse_metrics(slope_deg: np.ndarray, mask: np.ndarray, area_m2: float,
-                     density_class: str, lifeform_fractions: dict[str, float]) -> dict:
+                     density_class: str, lifeform_fractions: dict[str, float], *,
+                     density_measured: bool = True) -> dict:
+    """The walking rate, sweep width and one pass's hours over a footprint.
+    `density_measured` is False when `density_class` is an assumption
+    standing in for a density no panel measured; `sweep_width_basis` then
+    says so."""
     rates = tobler_rate_kmh(slope_deg)[mask]
     baseline = float(rates.mean()) if rates.size else 0.0
 
@@ -78,6 +111,8 @@ def traverse_metrics(slope_deg: np.ndarray, mask: np.ndarray, area_m2: float,
         "baseline_rate_kmh": baseline,
         "vegetation_adjusted_rate_kmh": adjusted,
         "effective_sweep_width_m": esw,
+        "sweep_width_basis": sweep_width_basis(lifeform_fractions,
+                                               density_measured=density_measured),
         "sweep_time_hours_per_pass": sweep_time_hours,
         "method": ("tobler1993 off-way x LANDFIRE lifeform speed factor (terrain.movement) "
                    "+ lifeform/density sweep matrix"),

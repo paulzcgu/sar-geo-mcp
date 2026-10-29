@@ -222,7 +222,11 @@ def register(mcp, ctx) -> None:
         stages has not got, so they are null and a warning says density is
         unknown); `traverse` (walking rate before and after vegetation, the
         `effective_sweep_width_m` - from the lifeform shares, at moderate
-        density when the density is unknown - and the hours one pass takes);
+        density when the density is unknown - with `sweep_width_basis`
+        saying which: "lifeform_and_density",
+        "lifeform_moderate_density_assumed", or "default_width" when no
+        vegetation type is known and the width is a flat default, with a
+        warning - and the hours one pass takes);
         `access` (OpenStreetMap routes on the staged ground counted by type and
         the names among them, and `ingress_count`, how many points a trail,
         track or road crosses the boundary at - null when the ground has no
@@ -237,7 +241,10 @@ def register(mcp, ctx) -> None:
         track's name, length inside the assignment and in all, the share
         inside, and when it entered and left, null without GPS timestamps),
         `effective_sweep_width_m` (an area's from the metrics; a line's
-        corridor width), `covered_fraction` (the share of the area, or of the
+        corridor width) and `sweep_width_basis` (the metrics' own, or
+        "default_corridor" for a line with none; a warning says when the
+        width is the default and every number below rests on it),
+        `covered_fraction` (the share of the area, or of the
         line's length, within half a sweep width of a track), `effort_coverage`
         (track length inside times sweep width over the area - the Koopman
         coverage, null for a line), `zone_area_m2` or `line_length_m`,
@@ -259,8 +266,10 @@ def register(mcp, ctx) -> None:
         folded into covered ground as GPS noise, with their total - not gaps,
         not unsearched. A track mostly outside the assignment is warned of,
         never dropped. An AREA's sweep width comes from the metrics: when the
-        metrics section fails, coverage of an area does not run, and its error
-        names the metrics failure. With metrics left out of `include`, coverage
+        metrics section fails, coverage of an area runs on the width an
+        earlier call saved on this ground, with a warning saying so, and with
+        none saved does not run, its error naming the metrics failure. With
+        metrics left out of `include`, coverage
         reads the metrics an earlier call saved on this ground (a re-staging
         discards them); with none saved, coverage of an area does not run, and
         its error says to add "metrics" to `include`. A LINE's coverage runs
@@ -298,10 +307,12 @@ def register(mcp, ctx) -> None:
         `summary` - the facts to read first, one block per section asked for,
         null when that section did not answer. `metrics`: `area_m2`,
         `relief_m`, `slope_mean_deg`, `slope_p90_deg`, `dominant_lifeform`,
-        `density_class`, `effective_sweep_width_m`,
+        `density_class`, `effective_sweep_width_m`, `sweep_width_basis`
+        (beside the width, since the summary keeps no warning),
         `sweep_time_hours_per_pass`, `drainages`, `cliff_bands` and
         `ingress_points` (null without OpenStreetMap). `coverage`:
-        `assignment_kind`, `covered_fraction`, `effort_coverage`, `tracks`,
+        `assignment_kind`, `covered_fraction`, `effort_coverage`,
+        `sweep_width_basis`, `tracks`,
         `gaps`, `gap_area_m2`, `gap_length_m`, `largest_gap` (id, area or
         length, point; null with no gap) and `time_searching_hours`.
         `features`: the count of each kind, null for a kind whose input is
@@ -332,11 +343,11 @@ def register(mcp, ctx) -> None:
 
         `exports` is always empty: a debrief draws nothing new for CalTopo -
         the assignment and the tracks are already on the map - and writes no
-        file. `get_assignment` carries the assignment's outline, and
-        coverage_for's own answer the gaps' - in Web Mercator (EPSG:3857)
-        metres, the coverage grid's coordinates, not WGS84 longitude and
-        latitude, so not GeoJSON a map takes as it stands; the `point` here is
-        WGS84. There is no medical section either: a debrief is about ground
+        file. `get_assignment` carries the assignment's outline, in WGS84
+        longitude and latitude as CalTopo holds it. The gap outlines are in
+        coverage_for's own answer, and those are in Web Mercator (EPSG:3857)
+        metres, the coverage grid's coordinates, so not GeoJSON a map takes as
+        it stands. Each gap's `point` here is WGS84. There is no medical section either: a debrief is about ground
         already searched, and `plan_medevac` or `nearest_medical_facilities`
         answer where a patient would go.
 
